@@ -1,6 +1,7 @@
 package com.keeply.app.data.local
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "things")
@@ -13,6 +14,10 @@ data class ThingEntity(
     val reminderAtEpochMillis: Long?,
     val reminderTimeZoneId: String?,
     val notes: String?,
+    @ColumnInfo(defaultValue = "'ACTIVE'") val statusCode: String,
+    val nextReminderAtEpochMillis: Long?,
+    val nextReminderTimeZoneId: String?,
     val createdAtEpochMillis: Long,
-    val updatedAtEpochMillis: Long
+    val updatedAtEpochMillis: Long,
+    @ColumnInfo(defaultValue = "0") val originalReminderActionable: Boolean = false
 )

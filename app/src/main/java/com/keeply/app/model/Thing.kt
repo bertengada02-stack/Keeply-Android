@@ -33,6 +33,18 @@ enum class ReminderType(val code: String) {
     }
 }
 
+enum class ThingStatus(val code: String) {
+    ACTIVE("ACTIVE"),
+    IN_PROGRESS("IN_PROGRESS"),
+    DONE("DONE");
+
+    companion object {
+        fun fromCode(code: String): ThingStatus =
+            entries.firstOrNull { it.code == code }
+                ?: error("Unknown Thing status code: $code")
+    }
+}
+
 data class Thing(
     val id: String,
     val name: String,
@@ -43,7 +55,11 @@ data class Thing(
     val reminderTimeZoneId: String?,
     val notes: String?,
     val createdAtEpochMillis: Long,
-    val updatedAtEpochMillis: Long
+    val updatedAtEpochMillis: Long,
+    val status: ThingStatus = ThingStatus.ACTIVE,
+    val nextReminderAtEpochMillis: Long? = null,
+    val nextReminderTimeZoneId: String? = null,
+    val originalReminderActionable: Boolean = false
 )
 
 data class NewThingDraft(
@@ -53,7 +69,8 @@ data class NewThingDraft(
     val reminderType: ReminderType?,
     val reminderAtEpochMillis: Long?,
     val reminderTimeZoneId: String?,
-    val notes: String
+    val notes: String,
+    val reminderExplicitlySelected: Boolean = false
 )
 
 data class PersistedThingValues(
@@ -89,5 +106,15 @@ fun Thing.toPersistedValues(): PersistedThingValues = PersistedThingValues(
     notes = notes
 )
 
-fun Thing.wouldPersistChanges(draft: NewThingDraft): Boolean =
-    toPersistedValues() != draft.toPersistedValues()
+fun Thing.wouldPersistChanges(draft: NewThingDraft): Boolean {
+    val desiredActionability = when (status) {
+        ThingStatus.ACTIVE -> when {
+            draft.reminderType == null -> false
+            draft.reminderExplicitlySelected -> true
+            else -> originalReminderActionable
+        }
+        ThingStatus.IN_PROGRESS, ThingStatus.DONE -> false
+    }
+    return toPersistedValues() != draft.toPersistedValues() ||
+        originalReminderActionable != desiredActionability
+}

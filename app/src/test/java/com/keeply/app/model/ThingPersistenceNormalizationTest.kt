@@ -45,6 +45,25 @@ class ThingPersistenceNormalizationTest {
         assertTrue(original.wouldPersistChanges(draft(notes = "New note")))
     }
 
+    @Test
+    fun explicitlyReselectingHistoricalReminderReactivatesOnlyActiveThing() {
+        val historical = thing().copy(
+            reminderType = ReminderType.ON_DAY,
+            reminderAtEpochMillis = 500L,
+            reminderTimeZoneId = "UTC",
+            originalReminderActionable = false
+        )
+        val selected = draft(
+            reminderType = ReminderType.ON_DAY,
+            reminderMillis = 500L,
+            reminderZone = "UTC",
+            reminderExplicitlySelected = true
+        )
+
+        assertTrue(historical.wouldPersistChanges(selected))
+        assertFalse(historical.copy(status = ThingStatus.DONE).wouldPersistChanges(selected))
+    }
+
     private fun thing() = Thing(
         id = "id",
         name = "Passport",
@@ -65,7 +84,8 @@ class ThingPersistenceNormalizationTest {
         reminderType: ReminderType? = null,
         reminderMillis: Long? = null,
         reminderZone: String? = null,
-        notes: String = ""
+        notes: String = "",
+        reminderExplicitlySelected: Boolean = false
     ) = NewThingDraft(
         name = name,
         category = category,
@@ -73,6 +93,7 @@ class ThingPersistenceNormalizationTest {
         reminderType = reminderType,
         reminderAtEpochMillis = reminderMillis,
         reminderTimeZoneId = reminderZone,
-        notes = notes
+        notes = notes,
+        reminderExplicitlySelected = reminderExplicitlySelected
     )
 }

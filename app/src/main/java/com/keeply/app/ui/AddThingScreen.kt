@@ -256,6 +256,7 @@ private fun ThingFormScreen(
     var reminderChoice by rememberSaveable(initialThing?.id) {
         mutableStateOf(initialThing?.reminderType?.toReminderChoice())
     }
+    var reminderExplicitlySelected by rememberSaveable(initialThing?.id) { mutableStateOf(false) }
     var customReminderMillis by rememberSaveable(initialThing?.id) {
         mutableStateOf(initialThing?.reminderAtEpochMillis.takeIf {
             initialThing?.reminderType == com.keeply.app.model.ReminderType.CUSTOM
@@ -300,7 +301,8 @@ private fun ThingFormScreen(
             reminderType = reminderChoice?.toReminderType(),
             reminderAtEpochMillis = resolvedReminder,
             reminderTimeZoneId = resolvedReminder?.let { timeZone },
-            notes = notes
+            notes = notes,
+            reminderExplicitlySelected = reminderExplicitlySelected
         )
     }
 
@@ -333,6 +335,7 @@ private fun ThingFormScreen(
                             set(year, month, day, hour, minute, 0)
                         }.timeInMillis
                         reminderChoice = ReminderChoice.CUSTOM
+                        reminderExplicitlySelected = true
                         revalidateReminder()
                     },
                     initial.get(Calendar.HOUR_OF_DAY),
@@ -569,6 +572,7 @@ private fun ThingFormScreen(
                     chooseCustomReminder()
                 } else {
                     reminderChoice = choice
+                    reminderExplicitlySelected = true
                     customReminderMillis = null
                     revalidateReminder()
                 }
@@ -576,6 +580,7 @@ private fun ThingFormScreen(
             onNoReminder = {
                 showReminderChoices = false
                 reminderChoice = null
+                reminderExplicitlySelected = true
                 customReminderMillis = null
                 reminderError = null
             }

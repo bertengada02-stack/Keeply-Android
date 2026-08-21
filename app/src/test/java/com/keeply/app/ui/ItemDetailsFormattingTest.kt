@@ -3,6 +3,7 @@ package com.keeply.app.ui
 import com.keeply.app.model.ReminderType
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
+import com.keeply.app.model.ThingStatus
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -92,12 +93,77 @@ class ItemDetailsFormattingTest {
         assertEquals("Important date", details.importantDateLabel)
     }
 
+    @Test
+    fun detailsSelectsReminderSourceFromLifecycleState() {
+        val active = thing(
+            reminderType = ReminderType.ON_DAY,
+            originalReminderActionable = true
+        )
+        assertEquals("On the day", active.toItemDetailsUiModel().reminderText)
+
+        val reopened = thing(
+            reminderType = ReminderType.ON_DAY,
+            originalReminderActionable = false
+        )
+        assertEquals("No active reminder", reopened.toItemDetailsUiModel().reminderText)
+
+        val inProgress = thing(
+            reminderType = ReminderType.ON_DAY,
+            originalReminderActionable = false,
+            status = ThingStatus.IN_PROGRESS,
+            nextReminderMillis = localMillis(TimeZone.getTimeZone("UTC")),
+            nextReminderZone = "UTC"
+        )
+        assertEquals(
+            "Aug 25, 2026 at 3:30 PM",
+            inProgress.toItemDetailsUiModel(TimeZone.getTimeZone("UTC"), Locale.US).reminderText
+        )
+
+        val done = active.copy(status = ThingStatus.DONE)
+        assertEquals("No active reminder", done.toItemDetailsUiModel().reminderText)
+    }
+
+    @Test
+    fun saveFeedbackUsesOnlyTheCurrentActionableReminder() {
+        val utc = TimeZone.getTimeZone("UTC")
+        val historicalOnly = thing(
+            reminderType = ReminderType.CUSTOM,
+            reminderMillis = localMillis(utc),
+            reminderTimeZoneId = "UTC",
+            originalReminderActionable = false
+        )
+        assertEquals(
+            "Saved to Keeply\nNo reminder is set, so Keeply won't notify you about this thing.",
+            historicalOnly.persistenceSuccessMessage(utc, Locale.US)
+        )
+
+        val activeOriginal = historicalOnly.copy(originalReminderActionable = true)
+        assertEquals(
+            "Reminder set\nKeeply will remind you on Aug 25, 2026 at 3:30 PM.",
+            activeOriginal.persistenceSuccessMessage(utc, Locale.US)
+        )
+
+        val followUp = historicalOnly.copy(
+            status = ThingStatus.IN_PROGRESS,
+            nextReminderAtEpochMillis = localMillis(utc),
+            nextReminderTimeZoneId = "UTC"
+        )
+        assertEquals(
+            "Reminder set\nKeeply will remind you on Aug 25, 2026 at 3:30 PM.",
+            followUp.persistenceSuccessMessage(utc, Locale.US)
+        )
+    }
+
     private fun thing(
         reminderType: ReminderType? = null,
         reminderMillis: Long? = null,
         reminderTimeZoneId: String? = null,
         notes: String? = null,
-        category: ThingCategory = ThingCategory.DOCUMENT
+        category: ThingCategory = ThingCategory.DOCUMENT,
+        originalReminderActionable: Boolean = false,
+        status: ThingStatus = ThingStatus.ACTIVE,
+        nextReminderMillis: Long? = null,
+        nextReminderZone: String? = null
     ) = Thing(
         id = "thing-id",
         name = "Passport",
@@ -108,7 +174,11 @@ class ItemDetailsFormattingTest {
         reminderTimeZoneId = reminderTimeZoneId,
         notes = notes,
         createdAtEpochMillis = 1L,
-        updatedAtEpochMillis = 1L
+        updatedAtEpochMillis = 1L,
+        status = status,
+        nextReminderAtEpochMillis = nextReminderMillis,
+        nextReminderTimeZoneId = nextReminderZone,
+        originalReminderActionable = originalReminderActionable
     )
 
     private fun localMillis(timeZone: TimeZone): Long = Calendar.getInstance(timeZone).apply {

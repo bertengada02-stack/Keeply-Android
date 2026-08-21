@@ -6,7 +6,9 @@ import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.ReminderType
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
+import com.keeply.app.model.ThingStatus
 import com.keeply.app.model.toPersistedValues
+import com.keeply.app.model.isValidNextReminder
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -32,6 +34,10 @@ class ThingRepository(
             reminderAtEpochMillis = values.reminderAtEpochMillis,
             reminderTimeZoneId = values.reminderTimeZoneId,
             notes = values.notes,
+            statusCode = ThingStatus.ACTIVE.code,
+            nextReminderAtEpochMillis = null,
+            nextReminderTimeZoneId = null,
+            originalReminderActionable = values.reminderType != null,
             createdAtEpochMillis = timestamp,
             updatedAtEpochMillis = timestamp
         )
@@ -49,7 +55,18 @@ class ThingRepository(
         val current = dao.findById(id) ?: throw ThingNotFoundException(id)
         val values = draft.toPersistedValues()
         val currentThing = current.toModel()
-        if (values == currentThing.toPersistedValues()) {
+        val desiredActionability = when (currentThing.status) {
+            ThingStatus.ACTIVE -> when {
+                values.reminderType == null -> false
+                draft.reminderExplicitlySelected -> true
+                else -> currentThing.originalReminderActionable
+            }
+            ThingStatus.IN_PROGRESS, ThingStatus.DONE -> false
+        }
+        if (
+            values == currentThing.toPersistedValues() &&
+            desiredActionability == currentThing.originalReminderActionable
+        ) {
             return UpdateThingResult(currentThing, changed = false)
         }
 
@@ -61,16 +78,47 @@ class ThingRepository(
             reminderAtEpochMillis = values.reminderAtEpochMillis,
             reminderTimeZoneId = values.reminderTimeZoneId,
             notes = values.notes,
+            originalReminderActionable = desiredActionability,
             updatedAtEpochMillis = maxOf(clock(), current.updatedAtEpochMillis + 1L)
         )
         if (dao.update(updated) != 1) throw ThingNotFoundException(id)
         return UpdateThingResult(updated.toModel(), changed = true)
+    }
+
+    suspend fun remindAgain(id: String, reminderAtEpochMillis: Long, timeZoneId: String) {
+        if (!isValidNextReminder(reminderAtEpochMillis, clock())) throw InvalidNextReminderException()
+        val current = dao.findById(id) ?: throw ThingNotFoundException(id)
+        if (current.statusCode == ThingStatus.DONE.code) throw InvalidLifecycleTransitionException()
+        val updatedAt = maxOf(clock(), current.updatedAtEpochMillis + 1L)
+        if (dao.remindAgain(id, reminderAtEpochMillis, timeZoneId, updatedAt) != 1) {
+            throw InvalidLifecycleTransitionException()
+        }
+    }
+
+    suspend fun markDone(id: String) {
+        val current = dao.findById(id) ?: throw ThingNotFoundException(id)
+        if (current.statusCode == ThingStatus.DONE.code) throw InvalidLifecycleTransitionException()
+        val updatedAt = maxOf(clock(), current.updatedAtEpochMillis + 1L)
+        if (dao.markDone(id, updatedAt) != 1) throw InvalidLifecycleTransitionException()
+    }
+
+    suspend fun reopen(id: String) {
+        val current = dao.findById(id) ?: throw ThingNotFoundException(id)
+        if (current.statusCode != ThingStatus.DONE.code) throw InvalidLifecycleTransitionException()
+        val updatedAt = maxOf(clock(), current.updatedAtEpochMillis + 1L)
+        if (dao.reopen(id, updatedAt) != 1) throw InvalidLifecycleTransitionException()
+    }
+
+    suspend fun deleteThing(id: String) {
+        if (dao.deleteById(id) != 1) throw ThingNotFoundException(id)
     }
 }
 
 data class UpdateThingResult(val thing: Thing, val changed: Boolean)
 
 class ThingNotFoundException(id: String) : IllegalStateException("Thing not found: $id")
+class InvalidLifecycleTransitionException : IllegalStateException("Lifecycle transition is not allowed")
+class InvalidNextReminderException : IllegalArgumentException("Next reminder must be in the future")
 
 internal fun ThingEntity.toModel(): Thing = Thing(
     id = id,
@@ -81,6 +129,10 @@ internal fun ThingEntity.toModel(): Thing = Thing(
     reminderAtEpochMillis = reminderAtEpochMillis,
     reminderTimeZoneId = reminderTimeZoneId,
     notes = notes,
+    status = ThingStatus.fromCode(statusCode),
+    nextReminderAtEpochMillis = nextReminderAtEpochMillis,
+    nextReminderTimeZoneId = nextReminderTimeZoneId,
+    originalReminderActionable = originalReminderActionable,
     createdAtEpochMillis = createdAtEpochMillis,
     updatedAtEpochMillis = updatedAtEpochMillis
 )

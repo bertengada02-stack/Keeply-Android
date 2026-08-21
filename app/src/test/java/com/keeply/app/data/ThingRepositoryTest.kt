@@ -5,6 +5,7 @@ import com.keeply.app.data.local.ThingEntity
 import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.ReminderType
 import com.keeply.app.model.ThingCategory
+import com.keeply.app.model.ThingStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -13,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThingRepositoryTest {
@@ -42,6 +44,7 @@ class ThingRepositoryTest {
         assertEquals("ONE_WEEK_BEFORE", dao.inserted.single().reminderTypeCode)
         assertEquals(1234L, dao.inserted.single().createdAtEpochMillis)
         assertEquals(1234L, dao.inserted.single().updatedAtEpochMillis)
+        assertTrue(created.originalReminderActionable)
     }
 
     @Test
@@ -65,6 +68,7 @@ class ThingRepositoryTest {
         assertNull(entity.reminderTypeCode)
         assertNull(entity.reminderAtEpochMillis)
         assertNull(entity.reminderTimeZoneId)
+        assertEquals(false, entity.originalReminderActionable)
         assertEquals("Store in cabinet", entity.notes)
     }
 
@@ -191,6 +195,219 @@ class ThingRepositoryTest {
         assertEquals(0, dao.updateCalls)
     }
 
+    @Test
+    fun activeCanBeRemindedAgainWithoutChangingImportantDateOrOriginalReminder() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+            reminderTypeCode = "ON_DAY",
+            reminderAtEpochMillis = 2_000L,
+            reminderTimeZoneId = "Asia/Singapore"
+        ))
+        val repository = ThingRepository(dao, clock = { 100L })
+
+        repository.remindAgain("passport", 5_000L, "Asia/Singapore")
+
+        val updated = dao.findById("passport")!!
+        assertEquals("IN_PROGRESS", updated.statusCode)
+        assertEquals(5_000L, updated.nextReminderAtEpochMillis)
+        assertEquals("2026-08-30", updated.importantDate)
+        assertEquals("ON_DAY", updated.reminderTypeCode)
+        assertEquals(2_000L, updated.reminderAtEpochMillis)
+        assertEquals(false, updated.originalReminderActionable)
+    }
+
+    @Test
+    fun inProgressReminderIsReplacedAndMayBeAfterImportantDate() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+            statusCode = "IN_PROGRESS",
+            nextReminderAtEpochMillis = 2_000L,
+            nextReminderTimeZoneId = "UTC"
+        ))
+        val repository = ThingRepository(dao, clock = { 100L })
+
+        repository.remindAgain("passport", 9_999_999_999_999L, "Asia/Singapore")
+
+        assertEquals(9_999_999_999_999L, dao.findById("passport")?.nextReminderAtEpochMillis)
+    }
+
+    @Test
+    fun activeAndInProgressCanBeMarkedDoneAndNextReminderIsCleared() = runBlocking {
+        listOf("ACTIVE", "IN_PROGRESS").forEach { initialStatus ->
+            val dao = FakeThingDao()
+            dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+                statusCode = initialStatus,
+                reminderTypeCode = "ON_DAY",
+                reminderAtEpochMillis = 2_000L,
+                nextReminderAtEpochMillis = 3_000L,
+                nextReminderTimeZoneId = "UTC"
+            ))
+            ThingRepository(dao, clock = { 100L }).markDone("passport")
+
+            val done = dao.findById("passport")!!
+            assertEquals("DONE", done.statusCode)
+            assertNull(done.nextReminderAtEpochMillis)
+            assertNull(done.nextReminderTimeZoneId)
+            assertEquals("ON_DAY", done.reminderTypeCode)
+            assertEquals(2_000L, done.reminderAtEpochMillis)
+            assertEquals(false, done.originalReminderActionable)
+        }
+    }
+
+    @Test
+    fun doneRejectsAllLifecycleTransitions() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(statusCode = "DONE"))
+        val repository = ThingRepository(dao, clock = { 100L })
+
+        assertThrows(InvalidLifecycleTransitionException::class.java) {
+            runBlocking { repository.remindAgain("passport", 500L, "UTC") }
+        }
+        assertThrows(InvalidLifecycleTransitionException::class.java) {
+            runBlocking { repository.markDone("passport") }
+        }
+        Unit
+    }
+
+    @Test
+    fun pastOrEqualNextReminderIsRejected() {
+        val repository = ThingRepository(FakeThingDao(), clock = { 500L })
+        assertThrows(InvalidNextReminderException::class.java) {
+            runBlocking { repository.remindAgain("passport", 500L, "UTC") }
+        }
+    }
+
+    @Test
+    fun deleteRemovesOnlyRequestedThingAndMissingDeleteFails() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT"))
+        dao.insert(sampleEntity("vehicle", "VEHICLE"))
+        val repository = ThingRepository(dao)
+
+        repository.deleteThing("passport")
+
+        assertNull(dao.findById("passport"))
+        assertEquals("vehicle", dao.findById("vehicle")?.id)
+        assertThrows(ThingNotFoundException::class.java) {
+            runBlocking { repository.deleteThing("missing") }
+        }
+        Unit
+    }
+
+    @Test
+    fun doneCanReopenWhilePreservingPersistedThingFields() = runBlocking {
+        val dao = FakeThingDao()
+        val original = sampleEntity("passport", "DOCUMENT").copy(
+            name = "My Passport",
+            importantDate = "2030-06-12",
+            reminderTypeCode = "CUSTOM",
+            reminderAtEpochMillis = 5_000L,
+            reminderTimeZoneId = "Asia/Singapore",
+            notes = "Keep safe",
+            statusCode = "DONE",
+            nextReminderAtEpochMillis = 7_000L,
+            nextReminderTimeZoneId = "UTC"
+        )
+        dao.insert(original)
+        val repository = ThingRepository(dao, clock = { 99L })
+
+        repository.reopen("passport")
+
+        val reopened = dao.findById("passport")!!
+        assertEquals("ACTIVE", reopened.statusCode)
+        assertEquals(original.id, reopened.id)
+        assertEquals(original.createdAtEpochMillis, reopened.createdAtEpochMillis)
+        assertEquals(original.name, reopened.name)
+        assertEquals(original.categoryCode, reopened.categoryCode)
+        assertEquals(original.importantDate, reopened.importantDate)
+        assertEquals(original.notes, reopened.notes)
+        assertEquals(original.reminderTypeCode, reopened.reminderTypeCode)
+        assertEquals(original.reminderAtEpochMillis, reopened.reminderAtEpochMillis)
+        assertEquals(original.reminderTimeZoneId, reopened.reminderTimeZoneId)
+        assertNull(reopened.nextReminderAtEpochMillis)
+        assertNull(reopened.nextReminderTimeZoneId)
+        assertEquals(false, reopened.originalReminderActionable)
+        assertEquals(99L, reopened.updatedAtEpochMillis)
+    }
+
+    @Test
+    fun activeAndInProgressCannotReopenAndAreNotMutated() = runBlocking {
+        listOf("ACTIVE", "IN_PROGRESS").forEach { status ->
+            val dao = FakeThingDao()
+            val original = sampleEntity("passport", "DOCUMENT").copy(statusCode = status)
+            dao.insert(original)
+            val repository = ThingRepository(dao, clock = { 99L })
+
+            assertThrows(InvalidLifecycleTransitionException::class.java) {
+                runBlocking { repository.reopen("passport") }
+            }
+            assertEquals(original, dao.findById("passport"))
+        }
+    }
+
+    @Test
+    fun reopeningOneThingNeverChangesAnother() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(statusCode = "DONE"))
+        val vehicle = sampleEntity("vehicle", "VEHICLE").copy(statusCode = "DONE")
+        dao.insert(vehicle)
+
+        ThingRepository(dao, clock = { 99L }).reopen("passport")
+
+        assertEquals("ACTIVE", dao.findById("passport")?.statusCode)
+        assertEquals(vehicle, dao.findById("vehicle"))
+    }
+
+    @Test
+    fun editingDoneThingDoesNotReopenIt() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(statusCode = "DONE"))
+
+        ThingRepository(dao, clock = { 99L }).updateThing("passport", draft(name = "Updated passport"))
+
+        assertEquals("DONE", dao.findById("passport")?.statusCode)
+        assertEquals("Updated passport", dao.findById("passport")?.name)
+        assertEquals(false, dao.findById("passport")?.originalReminderActionable)
+    }
+
+    @Test
+    fun activeEditControlsOriginalReminderActionability() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT"))
+        val repository = ThingRepository(dao, clock = { 99L })
+
+        repository.updateThing("passport", draft(
+            reminderType = ReminderType.ON_DAY,
+            reminderMillis = 500L,
+            reminderZone = "Asia/Singapore",
+            reminderExplicitlySelected = true
+        ))
+        assertTrue(dao.findById("passport")!!.originalReminderActionable)
+
+        repository.updateThing("passport", draft())
+        assertEquals(false, dao.findById("passport")!!.originalReminderActionable)
+    }
+
+    @Test
+    fun inProgressEditNeverReactivatesOriginalReminder() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+            statusCode = "IN_PROGRESS",
+            nextReminderAtEpochMillis = 1_000L,
+            nextReminderTimeZoneId = "UTC"
+        ))
+
+        ThingRepository(dao, clock = { 99L }).updateThing("passport", draft(
+            reminderType = ReminderType.ON_DAY,
+            reminderMillis = 500L,
+            reminderZone = "Asia/Singapore"
+        ))
+
+        val updated = dao.findById("passport")!!
+        assertEquals(false, updated.originalReminderActionable)
+        assertEquals(1_000L, updated.nextReminderAtEpochMillis)
+    }
+
     private fun draft(
         name: String = "passport",
         category: ThingCategory = ThingCategory.DOCUMENT,
@@ -198,7 +415,8 @@ class ThingRepositoryTest {
         reminderType: ReminderType? = null,
         reminderMillis: Long? = null,
         reminderZone: String? = null,
-        notes: String = ""
+        notes: String = "",
+        reminderExplicitlySelected: Boolean = false
     ) = NewThingDraft(
         name = name,
         category = category,
@@ -206,7 +424,8 @@ class ThingRepositoryTest {
         reminderType = reminderType,
         reminderAtEpochMillis = reminderMillis,
         reminderTimeZoneId = reminderZone,
-        notes = notes
+        notes = notes,
+        reminderExplicitlySelected = reminderExplicitlySelected
     )
 
     private fun sampleEntity(id: String, categoryCode: String) = ThingEntity(
@@ -218,6 +437,9 @@ class ThingRepositoryTest {
         reminderAtEpochMillis = null,
         reminderTimeZoneId = null,
         notes = null,
+        statusCode = ThingStatus.ACTIVE.code,
+        nextReminderAtEpochMillis = null,
+        nextReminderTimeZoneId = null,
         createdAtEpochMillis = 1L,
         updatedAtEpochMillis = 1L
     )
@@ -247,5 +469,29 @@ private class FakeThingDao : ThingDao {
         inserted[index] = thing
         values.value = inserted.toList()
         return 1
+    }
+
+    override suspend fun remindAgain(id: String, nextReminderAtEpochMillis: Long, nextReminderTimeZoneId: String, updatedAtEpochMillis: Long): Int {
+        val current = findById(id) ?: return 0
+        if (current.statusCode == ThingStatus.DONE.code) return 0
+        return update(current.copy(statusCode = ThingStatus.IN_PROGRESS.code, originalReminderActionable = false, nextReminderAtEpochMillis = nextReminderAtEpochMillis, nextReminderTimeZoneId = nextReminderTimeZoneId, updatedAtEpochMillis = updatedAtEpochMillis))
+    }
+
+    override suspend fun markDone(id: String, updatedAtEpochMillis: Long): Int {
+        val current = findById(id) ?: return 0
+        if (current.statusCode == ThingStatus.DONE.code) return 0
+        return update(current.copy(statusCode = ThingStatus.DONE.code, originalReminderActionable = false, nextReminderAtEpochMillis = null, nextReminderTimeZoneId = null, updatedAtEpochMillis = updatedAtEpochMillis))
+    }
+
+    override suspend fun reopen(id: String, updatedAtEpochMillis: Long): Int {
+        val current = findById(id) ?: return 0
+        if (current.statusCode != ThingStatus.DONE.code) return 0
+        return update(current.copy(statusCode = ThingStatus.ACTIVE.code, originalReminderActionable = false, nextReminderAtEpochMillis = null, nextReminderTimeZoneId = null, updatedAtEpochMillis = updatedAtEpochMillis))
+    }
+
+    override suspend fun deleteById(id: String): Int {
+        val removed = inserted.removeAll { it.id == id }
+        values.value = inserted.toList()
+        return if (removed) 1 else 0
     }
 }

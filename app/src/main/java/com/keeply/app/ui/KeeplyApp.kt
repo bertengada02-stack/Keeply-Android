@@ -91,12 +91,14 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
     var saveError by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedThingId by rememberSaveable { mutableStateOf<String?>(null) }
     var updateError by rememberSaveable { mutableStateOf<String?>(null) }
+    var lifecycleError by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val things = viewModel?.things?.collectAsStateWithLifecycle()?.value.orEmpty()
     val isSaving = viewModel?.isSaving?.collectAsStateWithLifecycle()?.value ?: false
     val itemDetailsState = viewModel?.itemDetailsState?.collectAsStateWithLifecycle()?.value
         ?: ItemDetailsState.NotSelected
     val isUpdating = viewModel?.isUpdating?.collectAsStateWithLifecycle()?.value ?: false
+    val isChangingLifecycle = viewModel?.isChangingLifecycle?.collectAsStateWithLifecycle()?.value ?: false
 
     LaunchedEffect(Unit) {
         delay(900)
@@ -106,10 +108,10 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
     LaunchedEffect(viewModel) {
         viewModel?.saveEvents?.collect { event ->
             when (event) {
-                SaveThingEvent.Saved -> {
+                is SaveThingEvent.Saved -> {
                     saveError = null
                     destination = AppDestination.MY_THINGS
-                    snackbarHostState.showSnackbar("Remembered")
+                    snackbarHostState.showSnackbar(event.thing.persistenceSuccessMessage())
                 }
                 SaveThingEvent.Failed -> {
                     saveError = "Keeply couldn't save this yet. Please try again."
@@ -121,10 +123,10 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
     LaunchedEffect(viewModel) {
         viewModel?.updateEvents?.collect { event ->
             when (event) {
-                UpdateThingEvent.Updated -> {
+                is UpdateThingEvent.Updated -> {
                     updateError = null
                     destination = AppDestination.ITEM_DETAILS
-                    snackbarHostState.showSnackbar("Updated")
+                    snackbarHostState.showSnackbar(event.thing.persistenceSuccessMessage())
                 }
                 UpdateThingEvent.Unchanged -> {
                     updateError = null
@@ -134,6 +136,42 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                     updateError = "Keeply couldn't update this yet. Please try again."
                 }
                 UpdateThingEvent.Missing -> updateError = null
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel?.lifecycleEvents?.collect { event ->
+            when (event) {
+                is LifecycleEvent.ReminderUpdated -> {
+                    lifecycleError = null
+                    snackbarHostState.showSnackbar(
+                        "New reminder set\nKeeply will remind you on ${formatFollowUpReminder(event.reminderAtEpochMillis, event.timeZoneId)}."
+                    )
+                }
+                LifecycleEvent.MarkedDone -> {
+                    lifecycleError = null
+                    snackbarHostState.showSnackbar("Marked as done")
+                }
+                LifecycleEvent.Reopened -> {
+                    lifecycleError = null
+                    snackbarHostState.showSnackbar("Reopened")
+                }
+                LifecycleEvent.Deleted -> {
+                    lifecycleError = null
+                    destination = AppDestination.MY_THINGS
+                    selectedThingId = null
+                    viewModel?.clearSelectedThing()
+                    snackbarHostState.showSnackbar("Deleted")
+                }
+                LifecycleEvent.Failed -> lifecycleError = "Keeply couldn't make that change yet. Please try again."
+                LifecycleEvent.Missing -> {
+                    lifecycleError = null
+                    destination = AppDestination.MY_THINGS
+                    selectedThingId = null
+                    viewModel?.clearSelectedThing()
+                    snackbarHostState.showSnackbar("This thing is no longer available.")
+                }
             }
         }
     }
@@ -231,6 +269,24 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                     updateError = null
                     destination = AppDestination.EDIT_THING
                 },
+                onRemindAgain = { millis, zone ->
+                    lifecycleError = null
+                    selectedThingId?.let { viewModel?.remindAgain(it, millis, zone) }
+                },
+                onMarkDone = {
+                    lifecycleError = null
+                    selectedThingId?.let { viewModel?.markDone(it) }
+                },
+                onReopen = {
+                    lifecycleError = null
+                    selectedThingId?.let { viewModel?.reopen(it) }
+                },
+                onDelete = {
+                    lifecycleError = null
+                    selectedThingId?.let { viewModel?.deleteThing(it) }
+                },
+                isChangingLifecycle = isChangingLifecycle,
+                lifecycleError = lifecycleError,
                 modifier = Modifier.padding(innerPadding)
             )
 

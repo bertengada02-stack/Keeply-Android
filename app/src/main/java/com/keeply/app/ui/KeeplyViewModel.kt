@@ -21,15 +21,24 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 internal sealed interface SaveThingEvent {
-    data object Saved : SaveThingEvent
+    data class Saved(val thing: Thing) : SaveThingEvent
     data object Failed : SaveThingEvent
 }
 
 internal sealed interface UpdateThingEvent {
-    data object Updated : UpdateThingEvent
+    data class Updated(val thing: Thing) : UpdateThingEvent
     data object Unchanged : UpdateThingEvent
     data object Failed : UpdateThingEvent
     data object Missing : UpdateThingEvent
+}
+
+internal sealed interface LifecycleEvent {
+    data class ReminderUpdated(val reminderAtEpochMillis: Long, val timeZoneId: String) : LifecycleEvent
+    data object MarkedDone : LifecycleEvent
+    data object Reopened : LifecycleEvent
+    data object Deleted : LifecycleEvent
+    data object Failed : LifecycleEvent
+    data object Missing : LifecycleEvent
 }
 
 internal sealed interface ItemDetailsState {
@@ -63,13 +72,16 @@ class KeeplyViewModel(
     internal val updateEvents: Flow<UpdateThingEvent> = updateEventsChannel.receiveAsFlow()
     private val _isUpdating = MutableStateFlow(false)
     internal val isUpdating: StateFlow<Boolean> = _isUpdating.asStateFlow()
+    private val lifecycleEventsChannel = Channel<LifecycleEvent>(Channel.BUFFERED)
+    internal val lifecycleEvents: Flow<LifecycleEvent> = lifecycleEventsChannel.receiveAsFlow()
+    private val _isChangingLifecycle = MutableStateFlow(false)
+    internal val isChangingLifecycle: StateFlow<Boolean> = _isChangingLifecycle.asStateFlow()
 
     fun createThing(draft: NewThingDraft) {
         if (!_isSaving.compareAndSet(expect = false, update = true)) return
         viewModelScope.launch {
             val event = try {
-                repository.createThing(draft)
-                SaveThingEvent.Saved
+                SaveThingEvent.Saved(repository.createThing(draft))
             } catch (_: Exception) {
                 SaveThingEvent.Failed
             } finally {
@@ -108,7 +120,7 @@ class KeeplyViewModel(
         viewModelScope.launch {
             val event = try {
                 val result = repository.updateThing(id, draft)
-                if (result.changed) UpdateThingEvent.Updated else UpdateThingEvent.Unchanged
+                if (result.changed) UpdateThingEvent.Updated(result.thing) else UpdateThingEvent.Unchanged
             } catch (_: ThingNotFoundException) {
                 _itemDetailsState.value = ItemDetailsState.NotFound
                 UpdateThingEvent.Missing
@@ -118,6 +130,40 @@ class KeeplyViewModel(
                 _isUpdating.value = false
             }
             updateEventsChannel.send(event)
+        }
+    }
+
+    internal fun remindAgain(id: String, reminderAtEpochMillis: Long, timeZoneId: String) =
+        runLifecycleChange(LifecycleEvent.ReminderUpdated(reminderAtEpochMillis, timeZoneId)) {
+            repository.remindAgain(id, reminderAtEpochMillis, timeZoneId)
+        }
+
+    internal fun markDone(id: String) = runLifecycleChange(LifecycleEvent.MarkedDone) {
+        repository.markDone(id)
+    }
+
+    internal fun reopen(id: String) = runLifecycleChange(LifecycleEvent.Reopened) {
+        repository.reopen(id)
+    }
+
+    internal fun deleteThing(id: String) = runLifecycleChange(LifecycleEvent.Deleted) {
+        repository.deleteThing(id)
+    }
+
+    private fun runLifecycleChange(success: LifecycleEvent, operation: suspend () -> Unit) {
+        if (!_isChangingLifecycle.compareAndSet(expect = false, update = true)) return
+        viewModelScope.launch {
+            val event = try {
+                operation()
+                success
+            } catch (_: ThingNotFoundException) {
+                LifecycleEvent.Missing
+            } catch (_: Exception) {
+                LifecycleEvent.Failed
+            } finally {
+                _isChangingLifecycle.value = false
+            }
+            lifecycleEventsChannel.send(event)
         }
     }
 
