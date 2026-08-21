@@ -1,6 +1,8 @@
 package com.keeply.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,27 +45,34 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.keeply.app.R
 import com.keeply.app.ui.theme.KeeplyTheme
 import kotlinx.coroutines.delay
 
 private enum class AppDestination {
     HOME,
-    MY_THINGS
+    MY_THINGS,
+    CATEGORY_SELECTION
 }
 
 @Composable
 fun KeeplyApp() {
     var showStartup by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
+    var previousPrimaryDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
 
     LaunchedEffect(Unit) {
         delay(900)
@@ -74,24 +84,41 @@ fun KeeplyApp() {
         return
     }
 
+    val openCategorySelection = {
+        if (destination != AppDestination.CATEGORY_SELECTION) {
+            previousPrimaryDestination = destination
+        }
+        destination = AppDestination.CATEGORY_SELECTION
+    }
+
+    BackHandler(enabled = destination == AppDestination.CATEGORY_SELECTION) {
+        destination = previousPrimaryDestination
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            KeeplyNavigationBar(
-                destination = destination,
-                onDestinationSelected = { destination = it }
-            )
+            if (destination != AppDestination.CATEGORY_SELECTION) {
+                KeeplyNavigationBar(
+                    destination = destination,
+                    onDestinationSelected = { destination = it },
+                    onRememberSomething = openCategorySelection
+                )
+            }
         }
     ) { innerPadding ->
         when (destination) {
             AppDestination.HOME -> EmptyHomeScreen(
-                onRememberSomething = {
-                    // Create flow is intentionally deferred to Milestone 2.
-                },
+                onRememberSomething = openCategorySelection,
                 modifier = Modifier.padding(innerPadding)
             )
 
             AppDestination.MY_THINGS -> MyThingsShell(
+                modifier = Modifier.padding(innerPadding)
+            )
+
+            AppDestination.CATEGORY_SELECTION -> CategorySelectionScreen(
+                onBack = { destination = previousPrimaryDestination },
                 modifier = Modifier.padding(innerPadding)
             )
         }
@@ -101,14 +128,16 @@ fun KeeplyApp() {
 @Composable
 private fun KeeplyNavigationBar(
     destination: AppDestination,
-    onDestinationSelected: (AppDestination) -> Unit
+    onDestinationSelected: (AppDestination) -> Unit,
+    onRememberSomething: () -> Unit
 ) {
     NavigationBar(
         modifier = Modifier
-            .height(72.dp)
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            .height(72.dp),
         containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp
+        tonalElevation = 0.dp,
+        windowInsets = WindowInsets(0, 0, 0, 0)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -124,7 +153,7 @@ private fun KeeplyNavigationBar(
             )
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 FloatingActionButton(
-                    onClick = { /* Create flow is intentionally deferred to Milestone 2. */ },
+                    onClick = onRememberSomething,
                     modifier = Modifier
                         .size(52.dp)
                         .semantics { contentDescription = "Remember something" },
@@ -170,7 +199,7 @@ private fun EmptyHomeScreen(
     ) {
         KeeplyHeader()
         Spacer(Modifier.height(22.dp))
-        EmptyHeroIllustration()
+        HomeHeroImage()
         Spacer(Modifier.height(8.dp))
         Text(
             text = "Nothing to remember yet",
@@ -208,14 +237,18 @@ private fun KeeplyHeader() {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = "Keeply",
+        Box(
             modifier = Modifier.weight(1f),
-            fontSize = 30.sp,
-            lineHeight = 36.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Image(
+                painter = painterResource(R.drawable.keeply_header),
+                contentDescription = "Keeply",
+                modifier = Modifier.height(36.dp),
+                contentScale = ContentScale.Fit,
+                alignment = Alignment.CenterStart
+            )
+        }
         SearchIcon()
         Spacer(Modifier.width(20.dp))
         SettingsIcon()
@@ -254,109 +287,16 @@ private fun SettingsIcon() {
 }
 
 @Composable
-private fun EmptyHeroIllustration() {
-    val teal = MaterialTheme.colorScheme.primary
-    val mint = MaterialTheme.colorScheme.primaryContainer
-    val surface = MaterialTheme.colorScheme.surface
-    val outline = MaterialTheme.colorScheme.outline
-    Canvas(
+private fun HomeHeroImage() {
+    Image(
+        painter = painterResource(R.drawable.keeply_calendar_reminder_hero),
+        contentDescription = "Calendar and reminder illustration",
         modifier = Modifier
             .fillMaxWidth()
-            .height(164.dp)
-            .semantics { contentDescription = "A calm illustration of Keeply remembering important dates" }
-    ) {
-        drawOval(
-            color = mint.copy(alpha = 0.50f),
-            topLeft = Offset(size.width * 0.17f, size.height * 0.79f),
-            size = Size(size.width * 0.66f, size.height * 0.12f)
-        )
-        // Foliage is anchored to the calendar base and painted behind all foreground objects.
-        drawBotanicalStem(
-            Offset(size.width * .25f, size.height * .84f),
-            Offset(size.width * .15f, size.height * .18f),
-            scale = .45f,
-            bendX = -42.dp.toPx()
-        )
-        drawBotanicalStem(
-            Offset(size.width * .75f, size.height * .84f),
-            Offset(size.width * .85f, size.height * .17f),
-            scale = .43f,
-            bendX = 42.dp.toPx()
-        )
-        drawRoundRect(
-            color = surface,
-            topLeft = Offset(size.width * 0.24f, size.height * 0.04f),
-            size = Size(size.width * 0.52f, size.height * 0.80f),
-            cornerRadius = CornerRadius(12.dp.toPx())
-        )
-        drawRoundRect(
-            color = outline.copy(alpha = 0.45f),
-            topLeft = Offset(size.width * 0.24f, size.height * 0.04f),
-            size = Size(size.width * 0.52f, size.height * 0.80f),
-            cornerRadius = CornerRadius(12.dp.toPx()),
-            style = Stroke(1.5.dp.toPx())
-        )
-        drawRoundRect(
-            color = teal,
-            topLeft = Offset(size.width * 0.24f, size.height * 0.04f),
-            size = Size(size.width * 0.52f, size.height * 0.19f),
-            cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx())
-        )
-        drawLine(outline, Offset(size.width * 0.37f, 0f), Offset(size.width * 0.37f, size.height * 0.14f), 4.dp.toPx(), StrokeCap.Round)
-        drawLine(outline, Offset(size.width * 0.63f, 0f), Offset(size.width * 0.63f, size.height * 0.14f), 4.dp.toPx(), StrokeCap.Round)
-        repeat(3) { row ->
-            repeat(4) { column ->
-                if (!(row == 0 && column == 3)) {
-                    drawRoundRect(
-                        color = mint.copy(alpha = .58f),
-                        topLeft = Offset(
-                            size.width * (.31f + column * .105f),
-                            size.height * (.31f + row * .17f)
-                        ),
-                        size = Size(17.dp.toPx(), 17.dp.toPx()),
-                        cornerRadius = CornerRadius(3.dp.toPx())
-                    )
-                }
-            }
-        }
-        val checkCenter = Offset(size.width * .66f, size.height * .36f)
-        drawCircle(teal, 11.dp.toPx(), checkCenter)
-        drawLine(surface, Offset(checkCenter.x - 5.dp.toPx(), checkCenter.y), Offset(checkCenter.x - 1.dp.toPx(), checkCenter.y + 4.dp.toPx()), 2.dp.toPx(), StrokeCap.Round)
-        drawLine(surface, Offset(checkCenter.x - 1.dp.toPx(), checkCenter.y + 4.dp.toPx()), Offset(checkCenter.x + 6.dp.toPx(), checkCenter.y - 5.dp.toPx()), 2.dp.toPx(), StrokeCap.Round)
-        val heroBell = Path().apply {
-            moveTo(size.width * .20f, size.height * .82f)
-            quadraticTo(size.width * .23f, size.height * .73f, size.width * .23f, size.height * .64f)
-            quadraticTo(size.width * .23f, size.height * .52f, size.width * .28f, size.height * .52f)
-            quadraticTo(size.width * .33f, size.height * .52f, size.width * .33f, size.height * .64f)
-            quadraticTo(size.width * .33f, size.height * .73f, size.width * .36f, size.height * .82f)
-            close()
-        }
-        drawPath(heroBell, teal)
-        drawRoundRect(
-            color = teal,
-            topLeft = Offset(size.width * .19f, size.height * .79f),
-            size = Size(size.width * .18f, 8.dp.toPx()),
-            cornerRadius = CornerRadius(4.dp.toPx())
-        )
-        drawCircle(teal, 5.dp.toPx(), Offset(size.width * .28f, size.height * .865f))
-        val clockCenter = Offset(size.width * .72f, size.height * .73f)
-        drawCircle(surface, 27.dp.toPx(), clockCenter)
-        drawCircle(Color(0xFF82BDB4), 27.dp.toPx(), clockCenter, style = Stroke(3.dp.toPx()))
-        repeat(4) { index ->
-            val angle = Math.toRadians(index * 90.0)
-            drawCircle(
-                color = Color(0xFFB9DDD7),
-                radius = 1.5.dp.toPx(),
-                center = Offset(
-                    clockCenter.x + kotlin.math.cos(angle).toFloat() * 20.dp.toPx(),
-                    clockCenter.y + kotlin.math.sin(angle).toFloat() * 20.dp.toPx()
-                )
-            )
-        }
-        drawLine(teal, clockCenter, Offset(clockCenter.x, clockCenter.y - 13.dp.toPx()), 2.5.dp.toPx(), StrokeCap.Round)
-        drawLine(teal, clockCenter, Offset(clockCenter.x + 9.dp.toPx(), clockCenter.y + 7.dp.toPx()), 2.5.dp.toPx(), StrokeCap.Round)
-        drawCircle(teal, 2.5.dp.toPx(), clockCenter)
-    }
+            .height(164.dp),
+        contentScale = ContentScale.Fit,
+        alignment = Alignment.Center
+    )
 }
 
 @Composable
@@ -371,7 +311,12 @@ private fun ReassurancePanel() {
         MiniBellIcon()
         Spacer(Modifier.width(12.dp))
         Text(
-            text = "Keeply will notify you on time\nso you'll never miss what matters.",
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append("Keeply will notify you on time")
+                }
+                append("\nso you'll never miss what matters.")
+            },
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -385,8 +330,8 @@ private data class ExampleThing(
     val glyph: CategoryGlyph
 )
 
-private enum class CategoryGlyph {
-    DOCUMENT, OWNED, PAYMENT, EXCHANGE, MONEY, VEHICLE, HOME, MEDICINE
+internal enum class CategoryGlyph {
+    DOCUMENT, OWNED, PAYMENT, EXCHANGE, MONEY, VEHICLE, HOME, MEDICINE, OTHER
 }
 
 @Composable
@@ -464,52 +409,15 @@ private fun ExampleCard(example: ExampleThing, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ClipboardIllustration() {
-    val teal = MaterialTheme.colorScheme.primary
-    val mint = MaterialTheme.colorScheme.primaryContainer
-    Canvas(
+    Image(
+        painter = painterResource(R.drawable.clipboard_checklist),
+        contentDescription = "Clipboard checklist illustration",
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
-            .semantics { contentDescription = "An empty clipboard with calm foliage" }
-    ) {
-        drawOval(mint.copy(alpha = .55f), Offset(size.width * .24f, size.height * .73f), Size(size.width * .52f, size.height * .15f))
-        drawBotanicalStem(
-            Offset(size.width * .35f, size.height * .79f),
-            Offset(size.width * .22f, size.height * .32f),
-            scale = .52f,
-            bendX = -45.dp.toPx()
-        )
-        drawBotanicalStem(
-            Offset(size.width * .65f, size.height * .79f),
-            Offset(size.width * .78f, size.height * .33f),
-            scale = .52f,
-            bendX = 45.dp.toPx()
-        )
-        drawRoundRect(
-            color = Color(0xFFF0F8F6),
-            topLeft = Offset(size.width * .36f, size.height * .20f),
-            size = Size(size.width * .28f, size.height * .58f),
-            cornerRadius = CornerRadius(12.dp.toPx())
-        )
-        drawRoundRect(
-            color = teal,
-            topLeft = Offset(size.width * .36f, size.height * .20f),
-            size = Size(size.width * .28f, size.height * .58f),
-            cornerRadius = CornerRadius(12.dp.toPx()),
-            style = Stroke(3.dp.toPx())
-        )
-        drawRoundRect(
-            color = teal,
-            topLeft = Offset(size.width * .44f, size.height * .14f),
-            size = Size(size.width * .12f, size.height * .12f),
-            cornerRadius = CornerRadius(6.dp.toPx())
-        )
-        repeat(4) { index ->
-            val y = size.height * (.38f + index * .10f)
-            drawCircle(Color(0xFF9CCFC6), 4.dp.toPx(), Offset(size.width * .43f, y))
-            drawLine(Color(0xFF9CCFC6), Offset(size.width * .48f, y), Offset(size.width * .58f, y), 5.dp.toPx(), StrokeCap.Round)
-        }
-    }
+            .height(220.dp),
+        contentScale = ContentScale.Fit,
+        alignment = Alignment.Center
+    )
 }
 
 @Composable
@@ -545,69 +453,21 @@ private fun KeeplyStartupScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
     ) {
-        val mint = MaterialTheme.colorScheme.primaryContainer
-        Canvas(Modifier.fillMaxSize()) {
-            drawRect(Color(0xFFF2F8F7))
-            val hillBack = Path().apply {
-                moveTo(0f, size.height * .91f)
-                quadraticTo(size.width * .17f, size.height * .85f, size.width * .41f, size.height * .93f)
-                quadraticTo(size.width * .69f, size.height * .84f, size.width, size.height * .89f)
-                lineTo(size.width, size.height)
-                lineTo(0f, size.height)
-                close()
-            }
-            drawPath(hillBack, Color(0xFFB9DDD7).copy(alpha = .34f))
-            val hillFront = Path().apply {
-                moveTo(0f, size.height * .87f)
-                quadraticTo(size.width * .15f, size.height * .82f, size.width * .37f, size.height * .95f)
-                quadraticTo(size.width * .48f, size.height * .98f, size.width * .61f, size.height)
-                lineTo(0f, size.height)
-                close()
-            }
-            drawPath(hillFront, Color(0xFF9CCFC6).copy(alpha = .22f))
-            val hillRight = Path().apply {
-                moveTo(size.width * .34f, size.height)
-                quadraticTo(size.width * .67f, size.height * .86f, size.width, size.height * .92f)
-                lineTo(size.width, size.height)
-                close()
-            }
-            drawPath(hillRight, Color(0xFF83BFB5).copy(alpha = .17f))
-            drawBotanicalStem(Offset(size.width * .08f, size.height), Offset(size.width * .12f, size.height * .60f), 1.25f)
-            drawBotanicalStem(Offset(size.width * .26f, size.height), Offset(size.width * .22f, size.height * .78f), .78f)
-            drawBotanicalStem(Offset(size.width * .72f, size.height), Offset(size.width * .78f, size.height * .61f), 1.18f)
-            drawBotanicalStem(Offset(size.width * .90f, size.height), Offset(size.width * .87f, size.height * .76f), .80f)
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 36.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            KeeplyMark(markSize = 136.dp, strokeWidth = 5.dp)
-            Spacer(Modifier.height(20.dp))
-            Text(
-                text = "Keeply",
-                fontSize = 58.sp,
-                lineHeight = 64.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = "One place to remember\nthe things you don't\nwant to forget.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-        }
+        Image(
+            painter = painterResource(R.drawable.keeply_splash),
+            contentDescription = "Keeply splash screen",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center
+        )
     }
 }
 
 @Composable
-private fun CategoryIcon(glyph: CategoryGlyph) {
+internal fun CategoryIcon(glyph: CategoryGlyph) {
     val teal = when (glyph) {
         CategoryGlyph.DOCUMENT -> Color(0xFF7451B9)
         CategoryGlyph.OWNED, CategoryGlyph.EXCHANGE -> Color(0xFFE06B17)
@@ -703,121 +563,29 @@ private fun CategoryIcon(glyph: CategoryGlyph) {
                 drawLine(teal, Offset(size.width * .50f, size.height * .53f), Offset(size.width * .50f, size.height * .67f), stroke)
                 drawLine(teal, Offset(size.width * .43f, size.height * .60f), Offset(size.width * .57f, size.height * .60f), stroke)
             }
+            CategoryGlyph.OTHER -> {
+                repeat(3) { index ->
+                    drawCircle(
+                        color = teal,
+                        radius = 2.5.dp.toPx(),
+                        center = Offset(size.width * (.34f + index * .16f), size.height * .52f)
+                    )
+                }
+            }
         }
     }
 }
 
 private val MaterialThemeColorFallback = Color(0xFFD8EFEC)
 
-private fun DrawScope.drawBotanicalStem(
-    base: Offset,
-    tip: Offset,
-    scale: Float = 1f,
-    bendX: Float = 0f
-) {
-    val stemColor = Color(0xFF75B9AE).copy(alpha = .40f)
-    val leafColor = Color(0xFF8CC8BE).copy(alpha = .27f)
-    val stem = Path().apply {
-        moveTo(base.x, base.y)
-        quadraticTo((base.x + tip.x) * .5f + bendX, (base.y + tip.y) * .5f, tip.x, tip.y)
-    }
-    drawPath(stem, stemColor, style = Stroke(2.dp.toPx() * scale, cap = StrokeCap.Round))
-    listOf(.25f, .44f, .62f, .79f).forEachIndexed { index, fraction ->
-        val inverse = 1f - fraction
-        val controlX = (base.x + tip.x) * .5f + bendX
-        val controlY = (base.y + tip.y) * .5f
-        val x = inverse * inverse * base.x + 2f * inverse * fraction * controlX + fraction * fraction * tip.x
-        val y = inverse * inverse * base.y + 2f * inverse * fraction * controlY + fraction * fraction * tip.y
-        val direction = if (index % 2 == 0) -1f else 1f
-        val leafWidth = 25.dp.toPx() * scale
-        val leafHeight = 35.dp.toPx() * scale
-        val start = Offset(x, y)
-        val end = Offset(x + direction * leafWidth, y - leafHeight)
-        val leaf = Path().apply {
-            moveTo(start.x, start.y)
-            quadraticTo(x + direction * leafWidth * .92f, y - leafHeight * .20f, end.x, end.y)
-            quadraticTo(x + direction * leafWidth * .05f, y - leafHeight * .72f, start.x, start.y)
-            close()
-        }
-        drawPath(leaf, leafColor)
-        val oppositeEnd = Offset(x - direction * leafWidth * .72f, y - leafHeight * .74f)
-        val oppositeLeaf = Path().apply {
-            moveTo(start.x, start.y)
-            quadraticTo(x - direction * leafWidth * .70f, y - leafHeight * .08f, oppositeEnd.x, oppositeEnd.y)
-            quadraticTo(x - direction * leafWidth * .04f, y - leafHeight * .58f, start.x, start.y)
-            close()
-        }
-        drawPath(oppositeLeaf, leafColor.copy(alpha = .82f))
-    }
-}
-
 @Composable
 private fun MiniBellIcon() {
-    val teal = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.size(24.dp).semantics { contentDescription = "Reminder" }) {
-        val bell = Path().apply {
-            moveTo(size.width * .20f, size.height * .70f)
-            quadraticTo(size.width * .30f, size.height * .58f, size.width * .30f, size.height * .38f)
-            quadraticTo(size.width * .30f, size.height * .16f, size.width * .50f, size.height * .16f)
-            quadraticTo(size.width * .70f, size.height * .16f, size.width * .70f, size.height * .38f)
-            quadraticTo(size.width * .70f, size.height * .58f, size.width * .80f, size.height * .70f)
-            close()
-        }
-        drawPath(bell, teal)
-        drawCircle(teal, 2.5.dp.toPx(), Offset(size.width * .50f, size.height * .82f))
-    }
-}
-
-@Composable
-private fun KeeplyMark(
-    markSize: androidx.compose.ui.unit.Dp,
-    strokeWidth: androidx.compose.ui.unit.Dp
-) {
-    val teal = MaterialTheme.colorScheme.primary
-    Canvas(
-        modifier = Modifier
-            .size(markSize)
-            .semantics { contentDescription = "Keeply bell logo" }
-    ) {
-        val stroke = strokeWidth.toPx()
-        drawCircle(color = teal, style = Stroke(width = stroke))
-        val bell = Path().apply {
-            moveTo(size.width * 0.35f, size.height * 0.59f)
-            quadraticTo(
-                size.width * 0.40f,
-                size.height * 0.52f,
-                size.width * 0.40f,
-                size.height * 0.40f
-            )
-            quadraticTo(
-                size.width * 0.40f,
-                size.height * 0.27f,
-                size.width * 0.50f,
-                size.height * 0.27f
-            )
-            quadraticTo(
-                size.width * 0.60f,
-                size.height * 0.27f,
-                size.width * 0.60f,
-                size.height * 0.40f
-            )
-            quadraticTo(
-                size.width * 0.60f,
-                size.height * 0.52f,
-                size.width * 0.65f,
-                size.height * 0.59f
-            )
-            close()
-        }
-        drawPath(path = bell, color = teal, style = Stroke(width = stroke, cap = StrokeCap.Round))
-        drawLine(
-            color = teal,
-            start = Offset(size.width * 0.46f, size.height * 0.66f),
-            end = Offset(size.width * 0.54f, size.height * 0.66f),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
-        )
-    }
+    Image(
+        painter = painterResource(R.drawable.keeply_bell),
+        contentDescription = "Reminder",
+        modifier = Modifier.size(28.dp),
+        contentScale = ContentScale.Fit
+    )
 }
 
 @Composable
