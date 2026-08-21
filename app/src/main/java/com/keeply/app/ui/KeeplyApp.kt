@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +32,8 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -61,6 +66,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keeply.app.R
+import com.keeply.app.model.Thing
 import com.keeply.app.ui.theme.KeeplyTheme
 import kotlinx.coroutines.delay
 
@@ -72,7 +78,7 @@ private enum class AppDestination {
 }
 
 @Composable
-fun KeeplyApp() {
+fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
     var showStartup by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
     var previousPrimaryDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
@@ -80,10 +86,29 @@ fun KeeplyApp() {
     var addThingBackDestination by rememberSaveable {
         mutableStateOf(AppDestination.CATEGORY_SELECTION)
     }
+    var saveError by rememberSaveable { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val things = viewModel?.things?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val isSaving = viewModel?.isSaving?.collectAsStateWithLifecycle()?.value ?: false
 
     LaunchedEffect(Unit) {
         delay(900)
         showStartup = false
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel?.saveEvents?.collect { event ->
+            when (event) {
+                SaveThingEvent.Saved -> {
+                    saveError = null
+                    destination = AppDestination.MY_THINGS
+                    snackbarHostState.showSnackbar("Remembered")
+                }
+                SaveThingEvent.Failed -> {
+                    saveError = "Keeply couldn't save this yet. Please try again."
+                }
+            }
+        }
     }
 
     if (showStartup) {
@@ -104,6 +129,7 @@ fun KeeplyApp() {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (destination == AppDestination.HOME || destination == AppDestination.MY_THINGS) {
                 KeeplyNavigationBar(
@@ -118,6 +144,7 @@ fun KeeplyApp() {
             AppDestination.HOME -> EmptyHomeScreen(
                 onRememberSomething = openCategorySelection,
                 onCategoryShortcut = { category ->
+                    saveError = null
                     selectedCategory = category
                     addThingBackDestination = AppDestination.HOME
                     destination = AppDestination.ADD_THING
@@ -126,12 +153,14 @@ fun KeeplyApp() {
             )
 
             AppDestination.MY_THINGS -> MyThingsShell(
+                things = things,
                 modifier = Modifier.padding(innerPadding)
             )
 
             AppDestination.CATEGORY_SELECTION -> CategorySelectionScreen(
                 onBack = { destination = previousPrimaryDestination },
                 onCategorySelected = { category ->
+                    saveError = null
                     selectedCategory = category
                     addThingBackDestination = AppDestination.CATEGORY_SELECTION
                     destination = AppDestination.ADD_THING
@@ -142,6 +171,12 @@ fun KeeplyApp() {
             AppDestination.ADD_THING -> AddThingScreen(
                 category = checkNotNull(selectedCategory),
                 onBack = { destination = addThingBackDestination },
+                onRememberThing = { draft ->
+                    saveError = null
+                    viewModel?.createThing(draft)
+                },
+                isSaving = isSaving,
+                saveError = saveError,
                 modifier = Modifier.padding(innerPadding)
             )
         }
@@ -454,7 +489,19 @@ private fun ClipboardIllustration() {
 }
 
 @Composable
-private fun MyThingsShell(modifier: Modifier = Modifier) {
+private fun MyThingsShell(
+    things: List<Thing>,
+    modifier: Modifier = Modifier
+) {
+    if (things.isEmpty()) {
+        EmptyMyThingsShell(modifier)
+    } else {
+        PopulatedMyThingsShell(things, modifier)
+    }
+}
+
+@Composable
+private fun EmptyMyThingsShell(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -478,6 +525,69 @@ private fun MyThingsShell(modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.weight(1.2f))
+    }
+}
+
+@Composable
+private fun PopulatedMyThingsShell(
+    things: List<Thing>,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 16.dp)
+    ) {
+        KeeplyHeader()
+        Spacer(Modifier.height(28.dp))
+        Text(
+            text = "My Things",
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(Modifier.height(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(items = things, key = Thing::id) { thing ->
+                ThingSummaryRow(thing)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThingSummaryRow(thing: Thing) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.32f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CategoryIcon(thing.category.toCategoryGlyph())
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = thing.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = thing.category.displayName(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = formatIsoImportantDate(thing.importantDate),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.keeply.app.model.NewThingDraft
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -117,6 +118,9 @@ internal fun isPresetReminderAvailable(
 internal fun AddThingScreen(
     category: CategoryGlyph,
     onBack: () -> Unit,
+    onRememberThing: (NewThingDraft) -> Unit,
+    isSaving: Boolean,
+    saveError: String?,
     modifier: Modifier = Modifier,
     nowMillis: () -> Long = { System.currentTimeMillis() }
 ) {
@@ -132,7 +136,6 @@ internal fun AddThingScreen(
     var reminderError by rememberSaveable { mutableStateOf<String?>(null) }
     var showReminderChoices by rememberSaveable { mutableStateOf(false) }
     var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
-    var showSuccess by rememberSaveable { mutableStateOf(false) }
 
     val hasChanges = name.isNotEmpty() || importantDateMillis != null ||
         reminderChoice != null || customReminderMillis != null || notes.isNotEmpty()
@@ -141,10 +144,6 @@ internal fun AddThingScreen(
     }
 
     BackHandler(onBack = requestBack)
-
-    fun clearResult() {
-        showSuccess = false
-    }
 
     fun currentReminderMillis(): Long? = when (reminderChoice) {
         null -> null
@@ -188,7 +187,6 @@ internal fun AddThingScreen(
                         }.timeInMillis
                         reminderChoice = ReminderChoice.CUSTOM
                         revalidateReminder()
-                        clearResult()
                     },
                     initial.get(Calendar.HOUR_OF_DAY),
                     initial.get(Calendar.MINUTE),
@@ -247,7 +245,6 @@ internal fun AddThingScreen(
                 name = it
                 nameError = null
                 revalidateReminder()
-                clearResult()
             },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Name") },
@@ -279,7 +276,6 @@ internal fun AddThingScreen(
                         }.timeInMillis
                         importantDateError = null
                         revalidateReminder()
-                        clearResult()
                     },
                     initial.get(Calendar.YEAR),
                     initial.get(Calendar.MONTH),
@@ -341,7 +337,6 @@ internal fun AddThingScreen(
             onValueChange = {
                 notes = it
                 revalidateReminder()
-                clearResult()
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -349,22 +344,45 @@ internal fun AddThingScreen(
             label = { Text("Notes (optional)") },
             minLines = 3
         )
-        if (showSuccess) {
+        saveError?.let {
             Text(
-                text = "✓ Ready to remember",
+                text = it,
                 modifier = Modifier.padding(top = 16.dp),
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.error
             )
         }
         Button(
             onClick = {
-                nameError = validateName(name)
-                importantDateError = validateImportantDate(importantDateMillis)
+                val submittedNameError = validateName(name)
+                val submittedDateError = validateImportantDate(importantDateMillis)
+                nameError = submittedNameError
+                importantDateError = submittedDateError
                 revalidateReminder()
-                showSuccess = nameError == null && importantDateError == null && reminderError == null
+                val submittedReminderError = reminderError
+                val submittedImportantDate = importantDateMillis
+                if (
+                    submittedNameError == null &&
+                    submittedDateError == null &&
+                    submittedReminderError == null &&
+                    submittedImportantDate != null
+                ) {
+                    val resolvedReminder = currentReminderMillis()
+                    onRememberThing(
+                        NewThingDraft(
+                            name = name,
+                            category = category.toThingCategory(),
+                            importantDate = importantDateToIso(submittedImportantDate, timeZone),
+                            reminderType = reminderChoice?.toReminderType(),
+                            reminderAtEpochMillis = resolvedReminder,
+                            reminderTimeZoneId = resolvedReminder?.let { timeZone },
+                            notes = notes
+                        )
+                    )
+                }
             },
+            enabled = !isSaving,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 20.dp)
@@ -390,7 +408,6 @@ internal fun AddThingScreen(
                     reminderChoice = choice
                     customReminderMillis = null
                     revalidateReminder()
-                    clearResult()
                 }
             },
             onNoReminder = {
@@ -398,7 +415,6 @@ internal fun AddThingScreen(
                 reminderChoice = null
                 customReminderMillis = null
                 reminderError = null
-                clearResult()
             }
         )
     }

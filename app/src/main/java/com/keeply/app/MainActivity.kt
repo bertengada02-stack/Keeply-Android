@@ -4,7 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.keeply.app.ui.KeeplyApp
+import com.keeply.app.ui.KeeplyViewModel
 import com.keeply.app.ui.theme.KeeplyTheme
 
 class MainActivity : ComponentActivity() {
@@ -13,7 +15,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KeeplyTheme {
-                KeeplyApp()
+                val keeplyViewModel: KeeplyViewModel = viewModel(
+                    factory = KeeplyViewModel.factory(
+                        (application as KeeplyApplication).thingRepository
+                    )
+                )
+                KeeplyApp(viewModel = keeplyViewModel)
             }
         }
     }
