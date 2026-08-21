@@ -16,4 +16,7 @@ interface ThingDao {
 
     @Query("SELECT * FROM things WHERE id = :id")
     suspend fun findById(id: String): ThingEntity?
+
+    @Query("SELECT * FROM things WHERE id = :id")
+    fun observeById(id: String): Flow<ThingEntity?>
 }

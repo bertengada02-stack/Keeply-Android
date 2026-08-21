@@ -74,7 +74,8 @@ private enum class AppDestination {
     HOME,
     MY_THINGS,
     CATEGORY_SELECTION,
-    ADD_THING
+    ADD_THING,
+    ITEM_DETAILS
 }
 
 @Composable
@@ -87,9 +88,12 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
         mutableStateOf(AppDestination.CATEGORY_SELECTION)
     }
     var saveError by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedThingId by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val things = viewModel?.things?.collectAsStateWithLifecycle()?.value.orEmpty()
     val isSaving = viewModel?.isSaving?.collectAsStateWithLifecycle()?.value ?: false
+    val itemDetailsState = viewModel?.itemDetailsState?.collectAsStateWithLifecycle()?.value
+        ?: ItemDetailsState.NotSelected
 
     LaunchedEffect(Unit) {
         delay(900)
@@ -108,6 +112,12 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                     saveError = "Keeply couldn't save this yet. Please try again."
                 }
             }
+        }
+    }
+
+    LaunchedEffect(destination, selectedThingId, viewModel) {
+        if (destination == AppDestination.ITEM_DETAILS) {
+            selectedThingId?.let { viewModel?.selectThing(it) }
         }
     }
 
@@ -154,6 +164,10 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
 
             AppDestination.MY_THINGS -> MyThingsShell(
                 things = things,
+                onThingSelected = { thingId ->
+                    selectedThingId = thingId
+                    destination = AppDestination.ITEM_DETAILS
+                },
                 modifier = Modifier.padding(innerPadding)
             )
 
@@ -177,6 +191,16 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                 },
                 isSaving = isSaving,
                 saveError = saveError,
+                modifier = Modifier.padding(innerPadding)
+            )
+
+            AppDestination.ITEM_DETAILS -> ItemDetailsScreen(
+                state = itemDetailsState,
+                onBack = {
+                    destination = AppDestination.MY_THINGS
+                    selectedThingId = null
+                    viewModel?.clearSelectedThing()
+                },
                 modifier = Modifier.padding(innerPadding)
             )
         }
@@ -491,12 +515,13 @@ private fun ClipboardIllustration() {
 @Composable
 private fun MyThingsShell(
     things: List<Thing>,
+    onThingSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (things.isEmpty()) {
         EmptyMyThingsShell(modifier)
     } else {
-        PopulatedMyThingsShell(things, modifier)
+        PopulatedMyThingsShell(things, onThingSelected, modifier)
     }
 }
 
@@ -531,6 +556,7 @@ private fun EmptyMyThingsShell(modifier: Modifier = Modifier) {
 @Composable
 private fun PopulatedMyThingsShell(
     things: List<Thing>,
+    onThingSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -548,14 +574,17 @@ private fun PopulatedMyThingsShell(
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(items = things, key = Thing::id) { thing ->
-                ThingSummaryRow(thing)
+                ThingSummaryRow(
+                    thing = thing,
+                    onClick = { onThingSelected(thing.id) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ThingSummaryRow(thing: Thing) {
+private fun ThingSummaryRow(thing: Thing, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -565,6 +594,8 @@ private fun ThingSummaryRow(thing: Thing) {
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.32f),
                 shape = RoundedCornerShape(14.dp)
             )
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Open ${thing.name} details" }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

@@ -13,12 +13,23 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 internal sealed interface SaveThingEvent {
     data object Saved : SaveThingEvent
     data object Failed : SaveThingEvent
+}
+
+internal sealed interface ItemDetailsState {
+    data object NotSelected : ItemDetailsState
+    data object Loading : ItemDetailsState
+    data class Content(val thing: Thing) : ItemDetailsState
+    data object NotFound : ItemDetailsState
+    data object Error : ItemDetailsState
 }
 
 class KeeplyViewModel(
@@ -36,6 +47,10 @@ class KeeplyViewModel(
     private val _isSaving = MutableStateFlow(false)
     val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
 
+    private val _itemDetailsState = MutableStateFlow<ItemDetailsState>(ItemDetailsState.NotSelected)
+    internal val itemDetailsState: StateFlow<ItemDetailsState> = _itemDetailsState.asStateFlow()
+    private var itemDetailsJob: Job? = null
+
     fun createThing(draft: NewThingDraft) {
         if (!_isSaving.compareAndSet(expect = false, update = true)) return
         viewModelScope.launch {
@@ -49,6 +64,30 @@ class KeeplyViewModel(
             }
             saveEventsChannel.send(event)
         }
+    }
+
+    internal fun selectThing(id: String) {
+        itemDetailsJob?.cancel()
+        _itemDetailsState.value = ItemDetailsState.Loading
+        itemDetailsJob = viewModelScope.launch {
+            repository.observeThing(id)
+                .catch {
+                    _itemDetailsState.value = ItemDetailsState.Error
+                }
+                .collect { thing ->
+                    _itemDetailsState.value = if (thing == null) {
+                        ItemDetailsState.NotFound
+                    } else {
+                        ItemDetailsState.Content(thing)
+                    }
+                }
+        }
+    }
+
+    internal fun clearSelectedThing() {
+        itemDetailsJob?.cancel()
+        itemDetailsJob = null
+        _itemDetailsState.value = ItemDetailsState.NotSelected
     }
 
     companion object {

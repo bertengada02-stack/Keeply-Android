@@ -38,6 +38,10 @@ class ThingRepository(
     }
 
     suspend fun findById(id: String): Thing? = dao.findById(id)?.toModel()
+
+    fun observeThing(id: String): Flow<Thing?> = dao.observeById(id).map { entity ->
+        entity?.toModel()
+    }
 }
 
 internal fun ThingEntity.toModel(): Thing = Thing(

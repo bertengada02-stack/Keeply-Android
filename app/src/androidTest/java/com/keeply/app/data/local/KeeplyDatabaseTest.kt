@@ -56,6 +56,19 @@ class KeeplyDatabaseTest {
         assertEquals("Asia/Singapore", restored?.reminderTimeZoneId)
     }
 
+    @Test
+    fun observeByIdReturnsOnlyRequestedThingAndNullForMissingId() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, KeeplyDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        database = db
+        db.thingDao().insert(entity("passport", "DOCUMENT", reminder = true))
+        db.thingDao().insert(entity("vehicle", "VEHICLE", reminder = false))
+
+        assertEquals("vehicle", db.thingDao().observeById("vehicle").first()?.id)
+        assertNull(db.thingDao().observeById("missing").first())
+    }
+
     private fun openPersistentDatabase(): KeeplyDatabase =
         Room.databaseBuilder(context, KeeplyDatabase::class.java, TEST_DATABASE).build()
 

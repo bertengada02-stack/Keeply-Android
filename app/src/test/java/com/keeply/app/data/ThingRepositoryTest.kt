@@ -8,6 +8,7 @@ import com.keeply.app.model.ThingCategory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -79,6 +80,26 @@ class ThingRepositoryTest {
         assertEquals(listOf("first", "second"), things.map { it.id })
     }
 
+    @Test
+    fun observeThingReturnsOnlyTheRequestedPersistedThing() = runBlocking {
+        val dao = FakeThingDao()
+        val repository = ThingRepository(dao)
+        dao.insert(sampleEntity("passport", "DOCUMENT"))
+        dao.insert(sampleEntity("vehicle", "VEHICLE"))
+
+        val selected = repository.observeThing("vehicle").first()
+
+        assertEquals("vehicle", selected?.id)
+        assertEquals(ThingCategory.VEHICLE, selected?.category)
+    }
+
+    @Test
+    fun observeThingReturnsNullForMissingId() = runBlocking {
+        val repository = ThingRepository(FakeThingDao())
+
+        assertNull(repository.observeThing("missing").first())
+    }
+
     private fun sampleEntity(id: String, categoryCode: String) = ThingEntity(
         id = id,
         name = id,
@@ -105,4 +126,7 @@ private class FakeThingDao : ThingDao {
     override fun observeAll(): Flow<List<ThingEntity>> = values
 
     override suspend fun findById(id: String): ThingEntity? = inserted.firstOrNull { it.id == id }
+
+    override fun observeById(id: String): Flow<ThingEntity?> =
+        values.map { entities -> entities.firstOrNull { it.id == id } }
 }
