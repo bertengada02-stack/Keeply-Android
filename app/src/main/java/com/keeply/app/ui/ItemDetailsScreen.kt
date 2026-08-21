@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 internal fun ItemDetailsScreen(
     state: ItemDetailsState,
     onBack: () -> Unit,
+    onEdit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onBack)
@@ -38,11 +39,22 @@ internal fun ItemDetailsScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier.semantics { contentDescription = "Back" }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            BackArrowIcon()
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.semantics { contentDescription = "Back" }
+            ) {
+                BackArrowIcon()
+            }
+            Spacer(Modifier.weight(1f))
+            if (state is ItemDetailsState.Content) {
+                TextButton(onClick = onEdit) {
+                    Text("Edit")
+                }
+            }
         }
         when (state) {
             ItemDetailsState.NotSelected,

@@ -69,6 +69,40 @@ class KeeplyDatabaseTest {
         assertNull(db.thingDao().observeById("missing").first())
     }
 
+    @Test
+    fun updateChangesOnlyRequestedRowAndPreservesIdentityFields() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, KeeplyDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        database = db
+        val passport = entity("passport", "DOCUMENT", reminder = true)
+        val vehicle = entity("vehicle", "VEHICLE", reminder = false)
+        db.thingDao().insert(passport)
+        db.thingDao().insert(vehicle)
+
+        val affected = db.thingDao().update(
+            passport.copy(
+                name = "Passport 2026",
+                categoryCode = "OWNED_ITEM",
+                importantDate = "2027-04-02",
+                reminderTypeCode = null,
+                reminderAtEpochMillis = null,
+                reminderTimeZoneId = null,
+                notes = null,
+                updatedAtEpochMillis = 99L
+            )
+        )
+
+        assertEquals(1, affected)
+        val updated = db.thingDao().observeById("passport").first()
+        assertEquals("passport", updated?.id)
+        assertEquals(passport.createdAtEpochMillis, updated?.createdAtEpochMillis)
+        assertEquals(99L, updated?.updatedAtEpochMillis)
+        assertEquals("Passport 2026", updated?.name)
+        assertEquals("vehicle", db.thingDao().findById("vehicle")?.name?.lowercase())
+        assertEquals(0, db.thingDao().update(passport.copy(id = "missing")))
+    }
+
     private fun openPersistentDatabase(): KeeplyDatabase =
         Room.databaseBuilder(context, KeeplyDatabase::class.java, TEST_DATABASE).build()
 

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.keeply.app.data.ThingRepository
+import com.keeply.app.data.ThingNotFoundException
 import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.Thing
 import kotlinx.coroutines.channels.Channel
@@ -22,6 +23,13 @@ import kotlinx.coroutines.launch
 internal sealed interface SaveThingEvent {
     data object Saved : SaveThingEvent
     data object Failed : SaveThingEvent
+}
+
+internal sealed interface UpdateThingEvent {
+    data object Updated : UpdateThingEvent
+    data object Unchanged : UpdateThingEvent
+    data object Failed : UpdateThingEvent
+    data object Missing : UpdateThingEvent
 }
 
 internal sealed interface ItemDetailsState {
@@ -50,6 +58,11 @@ class KeeplyViewModel(
     private val _itemDetailsState = MutableStateFlow<ItemDetailsState>(ItemDetailsState.NotSelected)
     internal val itemDetailsState: StateFlow<ItemDetailsState> = _itemDetailsState.asStateFlow()
     private var itemDetailsJob: Job? = null
+
+    private val updateEventsChannel = Channel<UpdateThingEvent>(Channel.BUFFERED)
+    internal val updateEvents: Flow<UpdateThingEvent> = updateEventsChannel.receiveAsFlow()
+    private val _isUpdating = MutableStateFlow(false)
+    internal val isUpdating: StateFlow<Boolean> = _isUpdating.asStateFlow()
 
     fun createThing(draft: NewThingDraft) {
         if (!_isSaving.compareAndSet(expect = false, update = true)) return
@@ -88,6 +101,24 @@ class KeeplyViewModel(
         itemDetailsJob?.cancel()
         itemDetailsJob = null
         _itemDetailsState.value = ItemDetailsState.NotSelected
+    }
+
+    internal fun updateThing(id: String, draft: NewThingDraft) {
+        if (!_isUpdating.compareAndSet(expect = false, update = true)) return
+        viewModelScope.launch {
+            val event = try {
+                val result = repository.updateThing(id, draft)
+                if (result.changed) UpdateThingEvent.Updated else UpdateThingEvent.Unchanged
+            } catch (_: ThingNotFoundException) {
+                _itemDetailsState.value = ItemDetailsState.NotFound
+                UpdateThingEvent.Missing
+            } catch (_: Exception) {
+                UpdateThingEvent.Failed
+            } finally {
+                _isUpdating.value = false
+            }
+            updateEventsChannel.send(event)
+        }
     }
 
     companion object {

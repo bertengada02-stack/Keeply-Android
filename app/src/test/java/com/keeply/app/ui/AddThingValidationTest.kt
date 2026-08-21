@@ -217,6 +217,50 @@ class AddThingValidationTest {
         )
     }
 
+    @Test
+    fun customReminderInstantDoesNotShiftWhenImportantDateChangesAndRemainsValid() {
+        val customReminder = localMillis(2026, Calendar.AUGUST, 24, 15, 30)
+        val now = localMillis(2026, Calendar.AUGUST, 22, 10, 0)
+        val changedImportantDate = localMillis(2026, Calendar.AUGUST, 26, 0, 0)
+
+        val resolved = resolveReminderMillis(
+            changedImportantDate,
+            ReminderChoice.CUSTOM,
+            customReminder,
+            timeZone
+        )
+
+        assertEquals(customReminder, resolved)
+        assertNull(validateReminderWindow(checkNotNull(resolved), now, changedImportantDate, timeZone))
+    }
+
+    @Test
+    fun customReminderBecomesInvalidWhenImportantDateMovesBeforeIt() {
+        val customReminder = localMillis(2026, Calendar.AUGUST, 24, 15, 30)
+        val now = localMillis(2026, Calendar.AUGUST, 22, 10, 0)
+        val changedImportantDate = localMillis(2026, Calendar.AUGUST, 23, 0, 0)
+
+        assertEquals(
+            REMINDER_AFTER_IMPORTANT_DATE_ERROR,
+            validateReminderWindow(customReminder, now, changedImportantDate, timeZone)
+        )
+    }
+
+    @Test
+    fun presetReminderRecalculatesWhenImportantDateChanges() {
+        val originalDate = localMillis(2026, Calendar.AUGUST, 25, 0, 0)
+        val changedDate = localMillis(2026, Calendar.SEPTEMBER, 2, 0, 0)
+
+        assertEquals(
+            localMillis(2026, Calendar.AUGUST, 24, 9, 0),
+            resolveReminderMillis(originalDate, ReminderChoice.ONE_DAY_BEFORE, null, timeZone)
+        )
+        assertEquals(
+            localMillis(2026, Calendar.SEPTEMBER, 1, 9, 0),
+            resolveReminderMillis(changedDate, ReminderChoice.ONE_DAY_BEFORE, null, timeZone)
+        )
+    }
+
     private fun assertPresetOffset(choice: ReminderChoice, expectedDay: Int) {
         val importantDate = localMillis(2026, Calendar.AUGUST, 20, 23, 30)
         assertEquals(

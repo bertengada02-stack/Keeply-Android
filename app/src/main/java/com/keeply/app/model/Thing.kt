@@ -55,3 +55,39 @@ data class NewThingDraft(
     val reminderTimeZoneId: String?,
     val notes: String
 )
+
+data class PersistedThingValues(
+    val name: String,
+    val category: ThingCategory,
+    val importantDate: String,
+    val reminderType: ReminderType?,
+    val reminderAtEpochMillis: Long?,
+    val reminderTimeZoneId: String?,
+    val notes: String?
+)
+
+fun NewThingDraft.toPersistedValues(): PersistedThingValues {
+    val hasReminder = reminderType != null
+    return PersistedThingValues(
+        name = name.trim(),
+        category = category,
+        importantDate = importantDate,
+        reminderType = reminderType,
+        reminderAtEpochMillis = reminderAtEpochMillis.takeIf { hasReminder },
+        reminderTimeZoneId = reminderTimeZoneId.takeIf { hasReminder },
+        notes = notes.trim().ifBlank { null }
+    )
+}
+
+fun Thing.toPersistedValues(): PersistedThingValues = PersistedThingValues(
+    name = name,
+    category = category,
+    importantDate = importantDate,
+    reminderType = reminderType,
+    reminderAtEpochMillis = reminderAtEpochMillis,
+    reminderTimeZoneId = reminderTimeZoneId,
+    notes = notes
+)
+
+fun Thing.wouldPersistChanges(draft: NewThingDraft): Boolean =
+    toPersistedValues() != draft.toPersistedValues()

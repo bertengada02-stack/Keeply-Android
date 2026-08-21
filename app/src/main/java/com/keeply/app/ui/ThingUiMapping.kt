@@ -52,6 +52,15 @@ internal fun ReminderChoice.toReminderType(): ReminderType = when (this) {
     ReminderChoice.CUSTOM -> ReminderType.CUSTOM
 }
 
+internal fun ReminderType.toReminderChoice(): ReminderChoice = when (this) {
+    ReminderType.ON_DAY -> ReminderChoice.ON_DAY
+    ReminderType.ONE_DAY_BEFORE -> ReminderChoice.ONE_DAY_BEFORE
+    ReminderType.THREE_DAYS_BEFORE -> ReminderChoice.THREE_DAYS_BEFORE
+    ReminderType.ONE_WEEK_BEFORE -> ReminderChoice.ONE_WEEK_BEFORE
+    ReminderType.THIRTY_DAYS_BEFORE -> ReminderChoice.THIRTY_DAYS_BEFORE
+    ReminderType.CUSTOM -> ReminderChoice.CUSTOM
+}
+
 internal fun importantDateToIso(millis: Long, timeZoneId: String): String {
     val calendar = Calendar.getInstance(TimeZone.getTimeZone(timeZoneId)).apply {
         timeInMillis = millis
@@ -63,6 +72,24 @@ internal fun importantDateToIso(millis: Long, timeZoneId: String): String {
         calendar.get(Calendar.MONTH) + 1,
         calendar.get(Calendar.DAY_OF_MONTH)
     )
+}
+
+internal fun isoImportantDateToMillis(isoDate: String, timeZoneId: String): Long? {
+    val parts = isoDate.split('-')
+    if (parts.size != 3) return null
+    val year = parts[0].toIntOrNull() ?: return null
+    val month = parts[1].toIntOrNull() ?: return null
+    val day = parts[2].toIntOrNull() ?: return null
+    return Calendar.getInstance(TimeZone.getTimeZone(timeZoneId)).apply {
+        isLenient = false
+        clear()
+        set(year, month - 1, day, 0, 0, 0)
+        try {
+            timeInMillis
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+    }.timeInMillis
 }
 
 internal fun formatIsoImportantDate(isoDate: String): String {

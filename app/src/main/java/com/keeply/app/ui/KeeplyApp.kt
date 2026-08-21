@@ -75,7 +75,8 @@ private enum class AppDestination {
     MY_THINGS,
     CATEGORY_SELECTION,
     ADD_THING,
-    ITEM_DETAILS
+    ITEM_DETAILS,
+    EDIT_THING
 }
 
 @Composable
@@ -89,11 +90,13 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
     }
     var saveError by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedThingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var updateError by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val things = viewModel?.things?.collectAsStateWithLifecycle()?.value.orEmpty()
     val isSaving = viewModel?.isSaving?.collectAsStateWithLifecycle()?.value ?: false
     val itemDetailsState = viewModel?.itemDetailsState?.collectAsStateWithLifecycle()?.value
         ?: ItemDetailsState.NotSelected
+    val isUpdating = viewModel?.isUpdating?.collectAsStateWithLifecycle()?.value ?: false
 
     LaunchedEffect(Unit) {
         delay(900)
@@ -115,8 +118,31 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
         }
     }
 
+    LaunchedEffect(viewModel) {
+        viewModel?.updateEvents?.collect { event ->
+            when (event) {
+                UpdateThingEvent.Updated -> {
+                    updateError = null
+                    destination = AppDestination.ITEM_DETAILS
+                    snackbarHostState.showSnackbar("Updated")
+                }
+                UpdateThingEvent.Unchanged -> {
+                    updateError = null
+                    destination = AppDestination.ITEM_DETAILS
+                }
+                UpdateThingEvent.Failed -> {
+                    updateError = "Keeply couldn't update this yet. Please try again."
+                }
+                UpdateThingEvent.Missing -> updateError = null
+            }
+        }
+    }
+
     LaunchedEffect(destination, selectedThingId, viewModel) {
-        if (destination == AppDestination.ITEM_DETAILS) {
+        if (
+            destination == AppDestination.ITEM_DETAILS ||
+            destination == AppDestination.EDIT_THING
+        ) {
             selectedThingId?.let { viewModel?.selectThing(it) }
         }
     }
@@ -201,8 +227,36 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                     selectedThingId = null
                     viewModel?.clearSelectedThing()
                 },
+                onEdit = {
+                    updateError = null
+                    destination = AppDestination.EDIT_THING
+                },
                 modifier = Modifier.padding(innerPadding)
             )
+
+            AppDestination.EDIT_THING -> when (val details = itemDetailsState) {
+                is ItemDetailsState.Content -> EditThingScreen(
+                    thing = details.thing,
+                    onBack = { destination = AppDestination.ITEM_DETAILS },
+                    onSaveChanges = { draft ->
+                        updateError = null
+                        selectedThingId?.let { viewModel?.updateThing(it, draft) }
+                    },
+                    onUnchangedSave = { destination = AppDestination.ITEM_DETAILS },
+                    isUpdating = isUpdating,
+                    updateError = updateError,
+                    modifier = Modifier.padding(innerPadding)
+                )
+                else -> EditThingUnavailableScreen(
+                    state = details,
+                    onBackToMyThings = {
+                        destination = AppDestination.MY_THINGS
+                        selectedThingId = null
+                        viewModel?.clearSelectedThing()
+                    },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
         }
     }
 }

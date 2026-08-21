@@ -46,4 +46,22 @@ class ThingUiMappingTest {
 
         assertEquals("2026-08-22", importantDateToIso(date, timeZone.id))
     }
+
+    @Test
+    fun persistedReminderTypesMapBackToFormChoices() {
+        assertEquals(ReminderChoice.ON_DAY, ReminderType.ON_DAY.toReminderChoice())
+        assertEquals(ReminderChoice.ONE_DAY_BEFORE, ReminderType.ONE_DAY_BEFORE.toReminderChoice())
+        assertEquals(ReminderChoice.THREE_DAYS_BEFORE, ReminderType.THREE_DAYS_BEFORE.toReminderChoice())
+        assertEquals(ReminderChoice.ONE_WEEK_BEFORE, ReminderType.ONE_WEEK_BEFORE.toReminderChoice())
+        assertEquals(ReminderChoice.THIRTY_DAYS_BEFORE, ReminderType.THIRTY_DAYS_BEFORE.toReminderChoice())
+        assertEquals(ReminderChoice.CUSTOM, ReminderType.CUSTOM.toReminderChoice())
+    }
+
+    @Test
+    fun isoImportantDateRoundTripsInControlledTimeZone() {
+        val timeZone = TimeZone.getTimeZone("Asia/Singapore")
+        val millis = isoImportantDateToMillis("2026-08-22", timeZone.id)
+
+        assertEquals("2026-08-22", importantDateToIso(checkNotNull(millis), timeZone.id))
+    }
 }

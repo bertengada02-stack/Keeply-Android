@@ -3,6 +3,7 @@ package com.keeply.app.ui
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,10 +34,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keeply.app.model.NewThingDraft
+import com.keeply.app.model.Thing
+import com.keeply.app.model.wouldPersistChanges
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -114,6 +119,19 @@ internal fun isPresetReminderAvailable(
     timeZone = timeZone
 ) == null
 
+internal fun resolveReminderMillis(
+    importantDateMillis: Long?,
+    choice: ReminderChoice?,
+    customReminderMillis: Long?,
+    timeZone: TimeZone
+): Long? = when (choice) {
+    null -> null
+    ReminderChoice.CUSTOM -> customReminderMillis
+    else -> importantDateMillis?.let {
+        presetReminderMillis(it, choice, timeZone)
+    }
+}
+
 @Composable
 internal fun AddThingScreen(
     category: CategoryGlyph,
@@ -124,38 +142,138 @@ internal fun AddThingScreen(
     modifier: Modifier = Modifier,
     nowMillis: () -> Long = { System.currentTimeMillis() }
 ) {
+    ThingFormScreen(
+        initialThing = null,
+        initialCategory = category,
+        heading = "Remember something",
+        primaryAction = "Remember this",
+        categoryEditable = false,
+        onBack = onBack,
+        onSubmit = { draft, _ -> onRememberThing(draft) },
+        onUnchangedSave = {},
+        isSubmitting = isSaving,
+        submitError = saveError,
+        modifier = modifier,
+        nowMillis = nowMillis
+    )
+}
+
+@Composable
+internal fun EditThingScreen(
+    thing: Thing,
+    onBack: () -> Unit,
+    onSaveChanges: (NewThingDraft) -> Unit,
+    onUnchangedSave: () -> Unit,
+    isUpdating: Boolean,
+    updateError: String?,
+    modifier: Modifier = Modifier,
+    nowMillis: () -> Long = { System.currentTimeMillis() }
+) {
+    ThingFormScreen(
+        initialThing = thing,
+        initialCategory = thing.category.toCategoryGlyph(),
+        heading = "Edit thing",
+        primaryAction = "Save changes",
+        categoryEditable = true,
+        onBack = onBack,
+        onSubmit = { draft, _ -> onSaveChanges(draft) },
+        onUnchangedSave = onUnchangedSave,
+        isSubmitting = isUpdating,
+        submitError = updateError,
+        modifier = modifier,
+        nowMillis = nowMillis
+    )
+}
+
+@Composable
+internal fun EditThingUnavailableScreen(
+    state: ItemDetailsState,
+    onBackToMyThings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BackHandler(onBack = onBackToMyThings)
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            IconButton(
+                onClick = onBackToMyThings,
+                modifier = Modifier.semantics { contentDescription = "Back" }
+            ) {
+                BackArrowIcon()
+            }
+        }
+        Spacer(Modifier.height(72.dp))
+        if (state == ItemDetailsState.Loading || state == ItemDetailsState.NotSelected) {
+            CircularProgressIndicator()
+        } else {
+            Text(
+                text = if (state == ItemDetailsState.NotFound) {
+                    "This thing is no longer available."
+                } else {
+                    "Keeply couldn't open this thing."
+                },
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            TextButton(
+                onClick = onBackToMyThings,
+                modifier = Modifier.padding(top = 16.dp)
+            ) {
+                Text("Back to My Things")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThingFormScreen(
+    initialThing: Thing?,
+    initialCategory: CategoryGlyph,
+    heading: String,
+    primaryAction: String,
+    categoryEditable: Boolean,
+    onBack: () -> Unit,
+    onSubmit: (NewThingDraft, Boolean) -> Unit,
+    onUnchangedSave: () -> Unit,
+    isSubmitting: Boolean,
+    submitError: String?,
+    modifier: Modifier = Modifier,
+    nowMillis: () -> Long = { System.currentTimeMillis() }
+) {
     val context = LocalContext.current
-    val timeZone = rememberSaveable { TimeZone.getDefault().id }
-    var name by rememberSaveable { mutableStateOf("") }
-    var importantDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
-    var reminderChoice by rememberSaveable { mutableStateOf<ReminderChoice?>(null) }
-    var customReminderMillis by rememberSaveable { mutableStateOf<Long?>(null) }
-    var notes by rememberSaveable { mutableStateOf("") }
+    var timeZone by rememberSaveable(initialThing?.id) {
+        mutableStateOf(initialThing?.reminderTimeZoneId ?: TimeZone.getDefault().id)
+    }
+    var category by rememberSaveable(initialThing?.id) { mutableStateOf(initialCategory) }
+    var name by rememberSaveable(initialThing?.id) { mutableStateOf(initialThing?.name.orEmpty()) }
+    var importantDateMillis by rememberSaveable(initialThing?.id) {
+        mutableStateOf(initialThing?.importantDate?.let { isoImportantDateToMillis(it, timeZone) })
+    }
+    var reminderChoice by rememberSaveable(initialThing?.id) {
+        mutableStateOf(initialThing?.reminderType?.toReminderChoice())
+    }
+    var customReminderMillis by rememberSaveable(initialThing?.id) {
+        mutableStateOf(initialThing?.reminderAtEpochMillis.takeIf {
+            initialThing?.reminderType == com.keeply.app.model.ReminderType.CUSTOM
+        })
+    }
+    var notes by rememberSaveable(initialThing?.id) { mutableStateOf(initialThing?.notes.orEmpty()) }
     var nameError by rememberSaveable { mutableStateOf<String?>(null) }
     var importantDateError by rememberSaveable { mutableStateOf<String?>(null) }
     var reminderError by rememberSaveable { mutableStateOf<String?>(null) }
     var showReminderChoices by rememberSaveable { mutableStateOf(false) }
+    var showCategoryChoices by rememberSaveable { mutableStateOf(false) }
     var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
-
-    val hasChanges = name.isNotEmpty() || importantDateMillis != null ||
-        reminderChoice != null || customReminderMillis != null || notes.isNotEmpty()
-    val requestBack = {
-        if (hasChanges) showDiscardDialog = true else onBack()
-    }
-
-    BackHandler(onBack = requestBack)
-
-    fun currentReminderMillis(): Long? = when (reminderChoice) {
-        null -> null
-        ReminderChoice.CUSTOM -> customReminderMillis
-        else -> importantDateMillis?.let {
-            presetReminderMillis(
-                importantDateMillis = it,
-                choice = checkNotNull(reminderChoice),
-                timeZone = TimeZone.getTimeZone(timeZone)
-            )
-        }
-    }
+    fun currentReminderMillis(): Long? = resolveReminderMillis(
+        importantDateMillis = importantDateMillis,
+        choice = reminderChoice,
+        customReminderMillis = customReminderMillis,
+        timeZone = TimeZone.getTimeZone(timeZone)
+    )
 
     fun revalidateReminder() {
         val selectedImportantDate = importantDateMillis
@@ -172,16 +290,45 @@ internal fun AddThingScreen(
         }
     }
 
+    fun currentDraft(): NewThingDraft? {
+        val selectedImportantDate = importantDateMillis ?: return null
+        val resolvedReminder = currentReminderMillis()
+        return NewThingDraft(
+            name = name,
+            category = category.toThingCategory(),
+            importantDate = importantDateToIso(selectedImportantDate, timeZone),
+            reminderType = reminderChoice?.toReminderType(),
+            reminderAtEpochMillis = resolvedReminder,
+            reminderTimeZoneId = resolvedReminder?.let { timeZone },
+            notes = notes
+        )
+    }
+
+    val isDirty = if (initialThing == null) {
+        name.isNotEmpty() || importantDateMillis != null || reminderChoice != null ||
+            customReminderMillis != null || notes.isNotEmpty()
+    } else {
+        currentDraft()?.let(initialThing::wouldPersistChanges) ?: true
+    }
+    val requestBack = {
+        if (isDirty) showDiscardDialog = true else onBack()
+    }
+
+    BackHandler(onBack = requestBack)
+
     fun chooseCustomReminder() {
         val selectedImportantDate = importantDateMillis ?: return
-        val initial = Calendar.getInstance()
+        val localTimeZone = TimeZone.getTimeZone(timeZone)
+        val initial = Calendar.getInstance(localTimeZone).apply {
+            customReminderMillis?.let { timeInMillis = it }
+        }
         val dateDialog = DatePickerDialog(
             context,
             { _, year, month, day ->
                 TimePickerDialog(
                     context,
                     { _, hour, minute ->
-                        customReminderMillis = Calendar.getInstance().apply {
+                        customReminderMillis = Calendar.getInstance(localTimeZone).apply {
                             clear()
                             set(year, month, day, hour, minute, 0)
                         }.timeInMillis
@@ -197,7 +344,6 @@ internal fun AddThingScreen(
             initial.get(Calendar.MONTH),
             initial.get(Calendar.DAY_OF_MONTH)
         )
-        val localTimeZone = TimeZone.getTimeZone(timeZone)
         dateDialog.datePicker.minDate = Calendar.getInstance(localTimeZone).apply {
             timeInMillis = nowMillis()
             set(Calendar.HOUR_OF_DAY, 0)
@@ -222,12 +368,23 @@ internal fun AddThingScreen(
             BackArrowIcon()
         }
         Text(
-            text = "Remember something",
+            text = heading,
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
         Row(
-            modifier = Modifier.padding(top = 16.dp, bottom = 22.dp),
+            modifier = Modifier
+                .padding(top = 16.dp, bottom = 22.dp)
+                .then(
+                    if (categoryEditable) {
+                        Modifier.clickable(
+                            role = Role.Button,
+                            onClick = { showCategoryChoices = true }
+                        )
+                    } else {
+                        Modifier
+                    }
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             CategoryIcon(category)
@@ -237,6 +394,14 @@ internal fun AddThingScreen(
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary
             )
+            if (categoryEditable) {
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Change",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
 
         OutlinedTextField(
@@ -264,13 +429,14 @@ internal fun AddThingScreen(
         )
         OutlinedButton(
             onClick = {
-                val initial = Calendar.getInstance().apply {
+                val formTimeZone = TimeZone.getTimeZone(timeZone)
+                val initial = Calendar.getInstance(formTimeZone).apply {
                     importantDateMillis?.let { timeInMillis = it }
                 }
                 DatePickerDialog(
                     context,
                     { _, year, month, day ->
-                        importantDateMillis = Calendar.getInstance().apply {
+                        importantDateMillis = Calendar.getInstance(formTimeZone).apply {
                             clear()
                             set(year, month, day, 0, 0, 0)
                         }.timeInMillis
@@ -316,7 +482,10 @@ internal fun AddThingScreen(
         }
         if (reminderChoice == ReminderChoice.CUSTOM && customReminderMillis != null) {
             Text(
-                text = formatDateTime(checkNotNull(customReminderMillis)),
+                text = formatDateTime(
+                    checkNotNull(customReminderMillis),
+                    TimeZone.getTimeZone(timeZone)
+                ),
                 modifier = Modifier.padding(top = 4.dp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -344,7 +513,7 @@ internal fun AddThingScreen(
             label = { Text("Notes (optional)") },
             minLines = 3
         )
-        saveError?.let {
+        submitError?.let {
             Text(
                 text = it,
                 modifier = Modifier.padding(top = 16.dp),
@@ -355,6 +524,10 @@ internal fun AddThingScreen(
         }
         Button(
             onClick = {
+                if (initialThing != null && !isDirty) {
+                    onUnchangedSave()
+                    return@Button
+                }
                 val submittedNameError = validateName(name)
                 val submittedDateError = validateImportantDate(importantDateMillis)
                 nameError = submittedNameError
@@ -368,27 +541,16 @@ internal fun AddThingScreen(
                     submittedReminderError == null &&
                     submittedImportantDate != null
                 ) {
-                    val resolvedReminder = currentReminderMillis()
-                    onRememberThing(
-                        NewThingDraft(
-                            name = name,
-                            category = category.toThingCategory(),
-                            importantDate = importantDateToIso(submittedImportantDate, timeZone),
-                            reminderType = reminderChoice?.toReminderType(),
-                            reminderAtEpochMillis = resolvedReminder,
-                            reminderTimeZoneId = resolvedReminder?.let { timeZone },
-                            notes = notes
-                        )
-                    )
+                    currentDraft()?.let { onSubmit(it, isDirty) }
                 }
             },
-            enabled = !isSaving,
+            enabled = !isSubmitting,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 20.dp)
                 .height(48.dp)
         ) {
-            Text("Remember this")
+            Text(primaryAction)
         }
         Spacer(Modifier.height(16.dp))
     }
@@ -402,6 +564,7 @@ internal fun AddThingScreen(
             onDismiss = { showReminderChoices = false },
             onSelected = { choice ->
                 showReminderChoices = false
+                timeZone = TimeZone.getDefault().id
                 if (choice == ReminderChoice.CUSTOM) {
                     chooseCustomReminder()
                 } else {
@@ -415,6 +578,19 @@ internal fun AddThingScreen(
                 reminderChoice = null
                 customReminderMillis = null
                 reminderError = null
+            }
+        )
+    }
+
+
+    if (showCategoryChoices) {
+        CategoryChoiceDialog(
+            selected = category,
+            onDismiss = { showCategoryChoices = false },
+            onSelected = { selected ->
+                category = selected
+                showCategoryChoices = false
+                revalidateReminder()
             }
         )
     }
@@ -515,6 +691,58 @@ private fun ReminderDialogRow(
     }
 }
 
+@Composable
+private fun CategoryChoiceDialog(
+    selected: CategoryGlyph,
+    onDismiss: () -> Unit,
+    onSelected: (CategoryGlyph) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose a category") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                CategoryGlyph.entries.forEach { category ->
+                    TextButton(
+                        onClick = { onSelected(category) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CategoryIcon(category)
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = categoryDisplayName(category),
+                                modifier = Modifier.weight(1f),
+                                color = if (selected == category) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                            if (selected == category) {
+                                Text("✓", color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
 private fun categoryDisplayName(category: CategoryGlyph): String = when (category) {
     CategoryGlyph.DOCUMENT -> "Document"
     CategoryGlyph.OWNED -> "Something I own"
@@ -538,5 +766,7 @@ private fun importantDateLabel(category: CategoryGlyph): String = when (category
 private fun formatDate(millis: Long): String =
     SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(millis))
 
-private fun formatDateTime(millis: Long): String =
-    SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault()).format(Date(millis))
+private fun formatDateTime(millis: Long, timeZone: TimeZone): String =
+    SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault()).apply {
+        this.timeZone = timeZone
+    }.format(Date(millis))

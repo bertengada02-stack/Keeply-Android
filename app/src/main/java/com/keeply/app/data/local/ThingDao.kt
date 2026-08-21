@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -19,4 +20,7 @@ interface ThingDao {
 
     @Query("SELECT * FROM things WHERE id = :id")
     fun observeById(id: String): Flow<ThingEntity?>
+
+    @Update
+    suspend fun update(thing: ThingEntity): Int
 }
