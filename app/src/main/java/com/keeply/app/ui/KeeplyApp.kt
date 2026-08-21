@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -56,6 +58,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -94,6 +97,8 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
     var lifecycleError by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val things = viewModel?.things?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val myThingsFilter = viewModel?.myThingsFilter?.collectAsStateWithLifecycle()?.value
+        ?: MyThingsFilter.ALL
     val isSaving = viewModel?.isSaving?.collectAsStateWithLifecycle()?.value ?: false
     val itemDetailsState = viewModel?.itemDetailsState?.collectAsStateWithLifecycle()?.value
         ?: ItemDetailsState.NotSelected
@@ -228,6 +233,8 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
 
             AppDestination.MY_THINGS -> MyThingsShell(
                 things = things,
+                selectedFilter = myThingsFilter,
+                onFilterSelected = { viewModel?.selectMyThingsFilter(it) },
                 onThingSelected = { thingId ->
                     selectedThingId = thingId
                     destination = AppDestination.ITEM_DETAILS
@@ -623,20 +630,33 @@ private fun ClipboardIllustration() {
 }
 
 @Composable
-private fun MyThingsShell(
+internal fun MyThingsShell(
     things: List<Thing>,
+    selectedFilter: MyThingsFilter,
+    onFilterSelected: (MyThingsFilter) -> Unit,
     onThingSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val filteredThings = remember(things, selectedFilter) { things.filteredBy(selectedFilter) }
     if (things.isEmpty()) {
-        EmptyMyThingsShell(modifier)
+        EmptyMyThingsShell(selectedFilter, onFilterSelected, modifier)
     } else {
-        PopulatedMyThingsShell(things, onThingSelected, modifier)
+        PopulatedMyThingsShell(
+            things = filteredThings,
+            selectedFilter = selectedFilter,
+            onFilterSelected = onFilterSelected,
+            onThingSelected = onThingSelected,
+            modifier = modifier
+        )
     }
 }
 
 @Composable
-private fun EmptyMyThingsShell(modifier: Modifier = Modifier) {
+private fun EmptyMyThingsShell(
+    selectedFilter: MyThingsFilter,
+    onFilterSelected: (MyThingsFilter) -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -644,6 +664,8 @@ private fun EmptyMyThingsShell(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         KeeplyHeader()
+        Spacer(Modifier.height(20.dp))
+        MyThingsFilterControl(selectedFilter, onFilterSelected)
         Spacer(Modifier.weight(0.8f))
         ClipboardIllustration()
         Spacer(Modifier.height(26.dp))
@@ -666,6 +688,8 @@ private fun EmptyMyThingsShell(modifier: Modifier = Modifier) {
 @Composable
 private fun PopulatedMyThingsShell(
     things: List<Thing>,
+    selectedFilter: MyThingsFilter,
+    onFilterSelected: (MyThingsFilter) -> Unit,
     onThingSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -681,15 +705,96 @@ private fun PopulatedMyThingsShell(
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
+        Spacer(Modifier.height(14.dp))
+        MyThingsFilterControl(selectedFilter, onFilterSelected)
         Spacer(Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(items = things, key = Thing::id) { thing ->
-                ThingSummaryRow(
-                    thing = thing,
-                    onClick = { onThingSelected(thing.id) }
+        if (things.isEmpty()) {
+            FilterEmptyState(selectedFilter, Modifier.weight(1f))
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(items = things, key = Thing::id) { thing ->
+                    ThingSummaryRow(
+                        thing = thing,
+                        onClick = { onThingSelected(thing.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MyThingsFilterControl(
+    selectedFilter: MyThingsFilter,
+    onFilterSelected: (MyThingsFilter) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MyThingsFilter.entries.forEach { filter ->
+            val selected = filter == selectedFilter
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .background(
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .selectable(
+                        selected = selected,
+                        role = Role.RadioButton,
+                        onClick = { onFilterSelected(filter) }
+                    )
+                    .semantics {
+                        stateDescription = if (selected) "Selected" else "Not selected"
+                    }
+                    .padding(horizontal = 6.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = filter.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun FilterEmptyState(filter: MyThingsFilter, modifier: Modifier = Modifier) {
+    val (title, description) = when (filter) {
+        MyThingsFilter.ACTIVE -> "No active things" to
+            "Things you're still keeping track of will appear here."
+        MyThingsFilter.COMPLETED -> "Nothing completed yet" to
+            "Things you mark as done will appear here."
+        MyThingsFilter.ALL -> "No things to show" to "Your saved things will appear here."
+    }
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        Text(
+            text = description,
+            modifier = Modifier.padding(top = 10.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }
 

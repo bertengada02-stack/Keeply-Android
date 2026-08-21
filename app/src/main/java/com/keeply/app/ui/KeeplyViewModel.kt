@@ -57,6 +57,12 @@ class KeeplyViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList()
     )
+    private val _myThingsFilter = MutableStateFlow(MyThingsFilter.ALL)
+    internal val myThingsFilter: StateFlow<MyThingsFilter> = _myThingsFilter.asStateFlow()
+
+    internal fun selectMyThingsFilter(filter: MyThingsFilter) {
+        _myThingsFilter.value = filter
+    }
 
     private val saveEventsChannel = Channel<SaveThingEvent>(Channel.BUFFERED)
     internal val saveEvents: Flow<SaveThingEvent> = saveEventsChannel.receiveAsFlow()
