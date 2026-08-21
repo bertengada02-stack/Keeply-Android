@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -65,7 +67,8 @@ import kotlinx.coroutines.delay
 private enum class AppDestination {
     HOME,
     MY_THINGS,
-    CATEGORY_SELECTION
+    CATEGORY_SELECTION,
+    ADD_THING
 }
 
 @Composable
@@ -73,6 +76,10 @@ fun KeeplyApp() {
     var showStartup by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
     var previousPrimaryDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
+    var selectedCategory by rememberSaveable { mutableStateOf<CategoryGlyph?>(null) }
+    var addThingBackDestination by rememberSaveable {
+        mutableStateOf(AppDestination.CATEGORY_SELECTION)
+    }
 
     LaunchedEffect(Unit) {
         delay(900)
@@ -98,7 +105,7 @@ fun KeeplyApp() {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (destination != AppDestination.CATEGORY_SELECTION) {
+            if (destination == AppDestination.HOME || destination == AppDestination.MY_THINGS) {
                 KeeplyNavigationBar(
                     destination = destination,
                     onDestinationSelected = { destination = it },
@@ -110,6 +117,11 @@ fun KeeplyApp() {
         when (destination) {
             AppDestination.HOME -> EmptyHomeScreen(
                 onRememberSomething = openCategorySelection,
+                onCategoryShortcut = { category ->
+                    selectedCategory = category
+                    addThingBackDestination = AppDestination.HOME
+                    destination = AppDestination.ADD_THING
+                },
                 modifier = Modifier.padding(innerPadding)
             )
 
@@ -119,6 +131,17 @@ fun KeeplyApp() {
 
             AppDestination.CATEGORY_SELECTION -> CategorySelectionScreen(
                 onBack = { destination = previousPrimaryDestination },
+                onCategorySelected = { category ->
+                    selectedCategory = category
+                    addThingBackDestination = AppDestination.CATEGORY_SELECTION
+                    destination = AppDestination.ADD_THING
+                },
+                modifier = Modifier.padding(innerPadding)
+            )
+
+            AppDestination.ADD_THING -> AddThingScreen(
+                category = checkNotNull(selectedCategory),
+                onBack = { destination = addThingBackDestination },
                 modifier = Modifier.padding(innerPadding)
             )
         }
@@ -188,6 +211,7 @@ private fun keeplyNavigationColors() = NavigationBarItemDefaults.colors(
 @Composable
 private fun EmptyHomeScreen(
     onRememberSomething: () -> Unit,
+    onCategoryShortcut: (CategoryGlyph) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -215,7 +239,7 @@ private fun EmptyHomeScreen(
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(14.dp))
-        ExampleThings()
+        ExampleThings(onCategoryShortcut = onCategoryShortcut)
         Spacer(Modifier.height(12.dp))
         ReassurancePanel()
         Spacer(Modifier.height(10.dp))
@@ -335,7 +359,7 @@ internal enum class CategoryGlyph {
 }
 
 @Composable
-private fun ExampleThings() {
+private fun ExampleThings(onCategoryShortcut: (CategoryGlyph) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -363,7 +387,11 @@ private fun ExampleThings() {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 rowItems.forEach { example ->
-                    ExampleCard(example, Modifier.weight(1f))
+                    ExampleCard(
+                        example = example,
+                        onClick = { onCategoryShortcut(example.glyph) },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
@@ -371,7 +399,11 @@ private fun ExampleThings() {
 }
 
 @Composable
-private fun ExampleCard(example: ExampleThing, modifier: Modifier = Modifier) {
+private fun ExampleCard(
+    example: ExampleThing,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
             .height(116.dp)
@@ -381,6 +413,7 @@ private fun ExampleCard(example: ExampleThing, modifier: Modifier = Modifier) {
                 MaterialTheme.colorScheme.outline.copy(alpha = 0.32f),
                 RoundedCornerShape(14.dp)
             )
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 5.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp)

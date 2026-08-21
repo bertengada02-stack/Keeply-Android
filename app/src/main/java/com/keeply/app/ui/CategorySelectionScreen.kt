@@ -62,6 +62,7 @@ private val categoryChoices = listOf(
 @Composable
 internal fun CategorySelectionScreen(
     onBack: () -> Unit,
+    onCategorySelected: (CategoryGlyph) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var selectedCategory by rememberSaveable { mutableStateOf<CategoryGlyph?>(null) }
@@ -94,7 +95,10 @@ internal fun CategorySelectionScreen(
                 CategorySelectionRow(
                     category = category,
                     selected = selectedCategory == category.glyph,
-                    onClick = { selectedCategory = category.glyph }
+                    onClick = {
+                        selectedCategory = category.glyph
+                        onCategorySelected(category.glyph)
+                    }
                 )
             }
         }
@@ -156,7 +160,7 @@ private fun CategorySelectionRow(
 }
 
 @Composable
-private fun BackArrowIcon() {
+internal fun BackArrowIcon() {
     val color = MaterialTheme.colorScheme.primary
     Canvas(Modifier.size(24.dp)) {
         val stroke = 2.5.dp.toPx()
