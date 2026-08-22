@@ -85,7 +85,7 @@ class ThingRepository(
         return UpdateThingResult(updated.toModel(), changed = true)
     }
 
-    suspend fun remindAgain(id: String, reminderAtEpochMillis: Long, timeZoneId: String) {
+    suspend fun remindAgain(id: String, reminderAtEpochMillis: Long, timeZoneId: String): Thing {
         if (!isValidNextReminder(reminderAtEpochMillis, clock())) throw InvalidNextReminderException()
         val current = dao.findById(id) ?: throw ThingNotFoundException(id)
         if (current.statusCode == ThingStatus.DONE.code) throw InvalidLifecycleTransitionException()
@@ -93,20 +93,23 @@ class ThingRepository(
         if (dao.remindAgain(id, reminderAtEpochMillis, timeZoneId, updatedAt) != 1) {
             throw InvalidLifecycleTransitionException()
         }
+        return dao.findById(id)?.toModel() ?: throw ThingNotFoundException(id)
     }
 
-    suspend fun markDone(id: String) {
+    suspend fun markDone(id: String): Thing {
         val current = dao.findById(id) ?: throw ThingNotFoundException(id)
         if (current.statusCode == ThingStatus.DONE.code) throw InvalidLifecycleTransitionException()
         val updatedAt = maxOf(clock(), current.updatedAtEpochMillis + 1L)
         if (dao.markDone(id, updatedAt) != 1) throw InvalidLifecycleTransitionException()
+        return dao.findById(id)?.toModel() ?: throw ThingNotFoundException(id)
     }
 
-    suspend fun reopen(id: String) {
+    suspend fun reopen(id: String): Thing {
         val current = dao.findById(id) ?: throw ThingNotFoundException(id)
         if (current.statusCode != ThingStatus.DONE.code) throw InvalidLifecycleTransitionException()
         val updatedAt = maxOf(clock(), current.updatedAtEpochMillis + 1L)
         if (dao.reopen(id, updatedAt) != 1) throw InvalidLifecycleTransitionException()
+        return dao.findById(id)?.toModel() ?: throw ThingNotFoundException(id)
     }
 
     suspend fun deleteThing(id: String) {

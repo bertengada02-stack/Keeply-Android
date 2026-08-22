@@ -1,6 +1,16 @@
 package com.keeply.app.ui
 
+import android.Manifest
+import android.app.AlarmManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,6 +46,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +66,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -68,8 +80,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.keeply.app.R
 import com.keeply.app.model.Thing
+import com.keeply.app.notifications.ReminderSyncResult
 import com.keeply.app.ui.theme.KeeplyTheme
 import kotlinx.coroutines.delay
 
@@ -83,7 +97,12 @@ private enum class AppDestination {
 }
 
 @Composable
-fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
+fun KeeplyApp(
+    viewModel: KeeplyViewModel? = null,
+    requestedThingId: String? = null,
+    onRequestedThingConsumed: () -> Unit = {}
+) {
+    val context = LocalContext.current
     var showStartup by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
     var previousPrimaryDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
@@ -104,10 +123,90 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
         ?: ItemDetailsState.NotSelected
     val isUpdating = viewModel?.isUpdating?.collectAsStateWithLifecycle()?.value ?: false
     val isChangingLifecycle = viewModel?.isChangingLifecycle?.collectAsStateWithLifecycle()?.value ?: false
+    var pendingPermissionSuccess by remember { mutableStateOf<String?>(null) }
+    var permissionOutcome by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val successMessage = pendingPermissionSuccess
+        pendingPermissionSuccess = null
+        if (successMessage != null) permissionOutcome = granted to successMessage
+    }
 
     LaunchedEffect(Unit) {
         delay(900)
         showStartup = false
+    }
+
+    LaunchedEffect(showStartup, requestedThingId, viewModel) {
+        if (!showStartup && requestedThingId != null) {
+            selectedThingId = requestedThingId
+            destination = AppDestination.ITEM_DETAILS
+            viewModel?.selectThing(requestedThingId)
+            onRequestedThingConsumed()
+        }
+    }
+
+    suspend fun showReminderFeedback(
+        result: ReminderSyncResult,
+        successMessage: String
+    ) {
+        when (result) {
+            ReminderSyncResult.NotificationsDisabled -> {
+                if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED &&
+                    !notificationPermissionWasRequested(context)
+                ) {
+                    markNotificationPermissionRequested(context)
+                    pendingPermissionSuccess = successMessage
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    val snackbarResult = snackbarHostState.showSnackbar(
+                        message = "Saved to Keeply\nNotifications are off, so Keeply can't notify you yet.",
+                        actionLabel = "Settings"
+                    )
+                    if (snackbarResult == SnackbarResult.ActionPerformed) {
+                        openNotificationSettings(context)
+                    }
+                }
+            }
+            ReminderSyncResult.ScheduledInexact -> {
+                val snackbarResult = snackbarHostState.showSnackbar(
+                    message = successMessage,
+                    actionLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "Exact timing" else null
+                )
+                if (snackbarResult == SnackbarResult.ActionPerformed) openExactAlarmSettings(context)
+            }
+            ReminderSyncResult.Failed -> snackbarHostState.showSnackbar(
+                "Saved to Keeply\nKeeply couldn't activate notifications yet. Open Keeply to try again."
+            )
+            ReminderSyncResult.NoReminder,
+            ReminderSyncResult.Past,
+            ReminderSyncResult.ScheduledExact -> snackbarHostState.showSnackbar(successMessage)
+        }
+    }
+
+    LaunchedEffect(permissionOutcome) {
+        val (granted, successMessage) = permissionOutcome ?: return@LaunchedEffect
+        permissionOutcome = null
+        if (granted) {
+            viewModel?.reconcileReminders()
+            val result = snackbarHostState.showSnackbar(
+                message = successMessage,
+                actionLabel = if (exactAlarmAccessUnavailable(context)) "Exact timing" else null
+            )
+            if (result == SnackbarResult.ActionPerformed) openExactAlarmSettings(context)
+        } else {
+            val result = snackbarHostState.showSnackbar(
+                message = "Saved to Keeply\nNotifications are off, so Keeply can't notify you yet.",
+                actionLabel = "Settings"
+            )
+            if (result == SnackbarResult.ActionPerformed) openNotificationSettings(context)
+        }
     }
 
     LaunchedEffect(viewModel) {
@@ -116,7 +215,10 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                 is SaveThingEvent.Saved -> {
                     saveError = null
                     destination = AppDestination.MY_THINGS
-                    snackbarHostState.showSnackbar(event.thing.persistenceSuccessMessage())
+                    showReminderFeedback(
+                        event.reminderSyncResult,
+                        event.thing.persistenceSuccessMessage()
+                    )
                 }
                 SaveThingEvent.Failed -> {
                     saveError = "Keeply couldn't save this yet. Please try again."
@@ -131,7 +233,10 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
                 is UpdateThingEvent.Updated -> {
                     updateError = null
                     destination = AppDestination.ITEM_DETAILS
-                    snackbarHostState.showSnackbar(event.thing.persistenceSuccessMessage())
+                    showReminderFeedback(
+                        event.reminderSyncResult,
+                        event.thing.persistenceSuccessMessage()
+                    )
                 }
                 UpdateThingEvent.Unchanged -> {
                     updateError = null
@@ -150,7 +255,8 @@ fun KeeplyApp(viewModel: KeeplyViewModel? = null) {
             when (event) {
                 is LifecycleEvent.ReminderUpdated -> {
                     lifecycleError = null
-                    snackbarHostState.showSnackbar(
+                    showReminderFeedback(
+                        event.reminderSyncResult,
                         "New reminder set\nKeeply will remind you on ${formatFollowUpReminder(event.reminderAtEpochMillis, event.timeZoneId)}."
                     )
                 }
@@ -1038,6 +1144,42 @@ private fun ThingsIcon(selected: Boolean) {
         drawLine(detailColor, Offset(size.width * .33f, size.height * .70f), Offset(size.width * .60f, size.height * .70f), stroke, StrokeCap.Round)
     }
 }
+
+private const val NotificationPreferences = "notification_preferences"
+private const val NotificationPermissionRequested = "post_notifications_requested"
+
+private fun notificationPermissionWasRequested(context: Context): Boolean =
+    context.getSharedPreferences(NotificationPreferences, Context.MODE_PRIVATE)
+        .getBoolean(NotificationPermissionRequested, false)
+
+private fun markNotificationPermissionRequested(context: Context) {
+    context.getSharedPreferences(NotificationPreferences, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(NotificationPermissionRequested, true)
+        .apply()
+}
+
+private fun openNotificationSettings(context: Context) {
+    context.startActivity(
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}
+
+private fun openExactAlarmSettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    context.startActivity(
+        Intent(
+            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+}
+
+private fun exactAlarmAccessUnavailable(context: Context): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        !context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
 
 @Preview(showBackground = true)
 @Composable

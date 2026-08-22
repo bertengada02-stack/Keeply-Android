@@ -7,6 +7,8 @@ import com.keeply.app.data.ThingRepository
 import com.keeply.app.data.ThingNotFoundException
 import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.Thing
+import com.keeply.app.notifications.ReminderSyncCoordinator
+import com.keeply.app.notifications.ReminderSyncResult
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,24 +18,30 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 internal sealed interface SaveThingEvent {
-    data class Saved(val thing: Thing) : SaveThingEvent
+    data class Saved(val thing: Thing, val reminderSyncResult: ReminderSyncResult) : SaveThingEvent
     data object Failed : SaveThingEvent
 }
 
 internal sealed interface UpdateThingEvent {
-    data class Updated(val thing: Thing) : UpdateThingEvent
+    data class Updated(val thing: Thing, val reminderSyncResult: ReminderSyncResult) : UpdateThingEvent
     data object Unchanged : UpdateThingEvent
     data object Failed : UpdateThingEvent
     data object Missing : UpdateThingEvent
 }
 
 internal sealed interface LifecycleEvent {
-    data class ReminderUpdated(val reminderAtEpochMillis: Long, val timeZoneId: String) : LifecycleEvent
+    data class ReminderUpdated(
+        val thing: Thing,
+        val reminderAtEpochMillis: Long,
+        val timeZoneId: String,
+        val reminderSyncResult: ReminderSyncResult
+    ) : LifecycleEvent
     data object MarkedDone : LifecycleEvent
     data object Reopened : LifecycleEvent
     data object Deleted : LifecycleEvent
@@ -49,8 +57,9 @@ internal sealed interface ItemDetailsState {
     data object Error : ItemDetailsState
 }
 
-class KeeplyViewModel(
-    private val repository: ThingRepository
+class KeeplyViewModel internal constructor(
+    private val repository: ThingRepository,
+    private val reminderSyncCoordinator: ReminderSyncCoordinator
 ) : ViewModel() {
     val things: StateFlow<List<Thing>> = repository.things.stateIn(
         scope = viewModelScope,
@@ -87,7 +96,8 @@ class KeeplyViewModel(
         if (!_isSaving.compareAndSet(expect = false, update = true)) return
         viewModelScope.launch {
             val event = try {
-                SaveThingEvent.Saved(repository.createThing(draft))
+                val thing = repository.createThing(draft)
+                SaveThingEvent.Saved(thing, reminderSyncCoordinator.sync(thing))
             } catch (_: Exception) {
                 SaveThingEvent.Failed
             } finally {
@@ -126,7 +136,12 @@ class KeeplyViewModel(
         viewModelScope.launch {
             val event = try {
                 val result = repository.updateThing(id, draft)
-                if (result.changed) UpdateThingEvent.Updated(result.thing) else UpdateThingEvent.Unchanged
+                if (result.changed) {
+                    UpdateThingEvent.Updated(
+                        result.thing,
+                        reminderSyncCoordinator.sync(result.thing)
+                    )
+                } else UpdateThingEvent.Unchanged
             } catch (_: ThingNotFoundException) {
                 _itemDetailsState.value = ItemDetailsState.NotFound
                 UpdateThingEvent.Missing
@@ -139,21 +154,43 @@ class KeeplyViewModel(
         }
     }
 
-    internal fun remindAgain(id: String, reminderAtEpochMillis: Long, timeZoneId: String) =
-        runLifecycleChange(LifecycleEvent.ReminderUpdated(reminderAtEpochMillis, timeZoneId)) {
-            repository.remindAgain(id, reminderAtEpochMillis, timeZoneId)
+    internal fun remindAgain(id: String, reminderAtEpochMillis: Long, timeZoneId: String) {
+        if (!_isChangingLifecycle.compareAndSet(expect = false, update = true)) return
+        viewModelScope.launch {
+            val event = try {
+                val thing = repository.remindAgain(id, reminderAtEpochMillis, timeZoneId)
+                LifecycleEvent.ReminderUpdated(
+                    thing,
+                    reminderAtEpochMillis,
+                    timeZoneId,
+                    reminderSyncCoordinator.sync(thing)
+                )
+            } catch (_: ThingNotFoundException) {
+                LifecycleEvent.Missing
+            } catch (_: Exception) {
+                LifecycleEvent.Failed
+            } finally {
+                _isChangingLifecycle.value = false
+            }
+            lifecycleEventsChannel.send(event)
         }
+    }
 
     internal fun markDone(id: String) = runLifecycleChange(LifecycleEvent.MarkedDone) {
-        repository.markDone(id)
+        reminderSyncCoordinator.sync(repository.markDone(id))
     }
 
     internal fun reopen(id: String) = runLifecycleChange(LifecycleEvent.Reopened) {
-        repository.reopen(id)
+        reminderSyncCoordinator.sync(repository.reopen(id))
     }
 
     internal fun deleteThing(id: String) = runLifecycleChange(LifecycleEvent.Deleted) {
         repository.deleteThing(id)
+        reminderSyncCoordinator.cancel(id)
+    }
+
+    internal fun reconcileReminders() {
+        viewModelScope.launch { reminderSyncCoordinator.syncAll(repository.things.first()) }
     }
 
     private fun runLifecycleChange(success: LifecycleEvent, operation: suspend () -> Unit) {
@@ -174,12 +211,15 @@ class KeeplyViewModel(
     }
 
     companion object {
-        fun factory(repository: ThingRepository): ViewModelProvider.Factory =
+        internal fun factory(
+            repository: ThingRepository,
+            reminderSyncCoordinator: ReminderSyncCoordinator
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     require(modelClass.isAssignableFrom(KeeplyViewModel::class.java))
-                    return KeeplyViewModel(repository) as T
+                    return KeeplyViewModel(repository, reminderSyncCoordinator) as T
                 }
             }
     }

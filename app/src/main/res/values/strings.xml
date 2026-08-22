@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Keeply</string>
+    <string name="reminder_channel_name">Keeply reminders</string>
+    <string name="reminder_channel_description">Reminders for things you asked Keeply to remember</string>
+    <string name="reminder_notification_title">Keeply reminder</string>
+    <string name="reminder_notification_body">Don\'t forget: %1$s</string>
 </resources>

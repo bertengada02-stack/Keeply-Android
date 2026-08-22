@@ -1,27 +1,58 @@
 package com.keeply.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keeply.app.ui.KeeplyApp
 import com.keeply.app.ui.KeeplyViewModel
 import com.keeply.app.ui.theme.KeeplyTheme
+import com.keeply.app.notifications.ACTION_OPEN_THING
+import com.keeply.app.notifications.EXTRA_THING_ID
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+    private val requestedThingId = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        acceptNotificationIntent(intent)
         enableEdgeToEdge()
         setContent {
             KeeplyTheme {
                 val keeplyViewModel: KeeplyViewModel = viewModel(
                     factory = KeeplyViewModel.factory(
-                        (application as KeeplyApplication).thingRepository
+                        (application as KeeplyApplication).thingRepository,
+                        (application as KeeplyApplication).reminderSyncCoordinator
                     )
                 )
-                KeeplyApp(viewModel = keeplyViewModel)
+                val requestedId = requestedThingId.collectAsStateWithLifecycle().value
+                KeeplyApp(
+                    viewModel = keeplyViewModel,
+                    requestedThingId = requestedId,
+                    onRequestedThingConsumed = { requestedThingId.value = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptNotificationIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (application as KeeplyApplication).reconcileReminders()
+    }
+
+    private fun acceptNotificationIntent(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_THING) {
+            requestedThingId.value = intent.getStringExtra(EXTRA_THING_ID)
         }
     }
 }
