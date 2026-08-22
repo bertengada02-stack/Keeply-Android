@@ -3,6 +3,7 @@ package com.keeply.app.ui
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
 import com.keeply.app.model.ThingStatus
+import com.keeply.app.model.ReminderDeliveryState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,6 +41,22 @@ class MyThingsFilterTest {
     }
 
     @Test
+    fun missedIncludesActiveAndInProgressMissedThingsWithoutChangingLifecycleFilters() {
+        val withMissed = listOf(
+            thing("active-missed", ThingStatus.ACTIVE, 3L, ReminderDeliveryState.MISSED_UNANNOUNCED),
+            thing("progress-missed", ThingStatus.IN_PROGRESS, 2L, ReminderDeliveryState.MISSED_ANNOUNCED),
+            thing("active-normal", ThingStatus.ACTIVE, 1L)
+        )
+
+        assertEquals(
+            listOf("active-missed", "progress-missed"),
+            withMissed.filteredBy(MyThingsFilter.MISSED).map(Thing::id)
+        )
+        assertEquals(3, withMissed.filteredBy(MyThingsFilter.ALL).size)
+        assertEquals(3, withMissed.filteredBy(MyThingsFilter.ACTIVE).size)
+    }
+
+    @Test
     fun filteringDoesNotMutateOrDuplicateSourceThings() {
         val original = mixed.toList()
         MyThingsFilter.entries.forEach { filter ->
@@ -58,7 +75,12 @@ class MyThingsFilterTest {
             .filteredBy(MyThingsFilter.COMPLETED).isEmpty())
     }
 
-    private fun thing(id: String, status: ThingStatus, createdAt: Long) = Thing(
+    private fun thing(
+        id: String,
+        status: ThingStatus,
+        createdAt: Long,
+        deliveryState: ReminderDeliveryState = ReminderDeliveryState.NONE
+    ) = Thing(
         id = id,
         name = id,
         category = ThingCategory.DOCUMENT,
@@ -69,6 +91,7 @@ class MyThingsFilterTest {
         notes = null,
         createdAtEpochMillis = createdAt,
         updatedAtEpochMillis = createdAt,
-        status = status
+        status = status,
+        reminderDeliveryState = deliveryState
     )
 }

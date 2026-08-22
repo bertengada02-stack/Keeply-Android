@@ -2,6 +2,7 @@ package com.keeply.app.notifications
 
 import com.keeply.app.model.ActionableReminder
 import com.keeply.app.model.Thing
+import com.keeply.app.model.ReminderDeliveryState
 import com.keeply.app.model.actionableReminder
 
 internal sealed interface ReminderScheduleDecision {
@@ -15,6 +16,9 @@ internal sealed interface ReminderScheduleDecision {
 }
 
 internal fun Thing.reminderScheduleDecision(nowEpochMillis: Long): ReminderScheduleDecision {
+    if (reminderDeliveryState != ReminderDeliveryState.PENDING) {
+        return ReminderScheduleDecision.None
+    }
     val actionable = actionableReminder() ?: return ReminderScheduleDecision.None
     val (trigger, zone) = when (actionable) {
         is ActionableReminder.Original -> actionable.atEpochMillis to actionable.timeZoneId

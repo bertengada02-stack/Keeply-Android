@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
 import com.keeply.app.model.ThingStatus
+import com.keeply.app.model.ReminderDeliveryState
 import com.keeply.app.ui.theme.KeeplyTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -49,6 +50,12 @@ class MyThingsScreenTest {
         composeRule.onNodeWithText("Things you ask Keeply to remember\nwill appear here.")
             .assertIsDisplayed()
         composeRule.onAllNodesWithText("Nothing completed yet").assertCountEquals(0)
+
+        composeRule.onNodeWithText("Missed").performClick()
+        composeRule.onNodeWithText("Missed").assert(selected())
+        composeRule.onNodeWithText("Things you ask Keeply to remember\nwill appear here.")
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithText("No missed reminders").assertCountEquals(0)
     }
 
     @Test
@@ -74,6 +81,10 @@ class MyThingsScreenTest {
         composeRule.onNodeWithText("Nothing completed yet").assertIsDisplayed()
         composeRule.onNodeWithText("Things you mark as done will appear here.")
             .assertIsDisplayed()
+
+        composeRule.runOnIdle { filter = MyThingsFilter.MISSED }
+        composeRule.onNodeWithText("No missed reminders").assertIsDisplayed()
+        composeRule.onNodeWithText("You're all caught up.").assertIsDisplayed()
     }
 
     @Test
@@ -94,9 +105,37 @@ class MyThingsScreenTest {
         composeRule.runOnIdle { assertEquals("done-id", selectedId) }
     }
 
+    @Test
+    fun missedFilterShowsMissedThingAndOpensItsExactId() {
+        var selectedId: String? = null
+        val things = listOf(
+            thing("normal", "Normal passport", ThingStatus.ACTIVE),
+            thing(
+                "missed",
+                "Missed passport",
+                ThingStatus.ACTIVE,
+                ReminderDeliveryState.MISSED_ANNOUNCED
+            )
+        )
+        composeRule.setContent {
+            KeeplyTheme {
+                MyThingsShell(things, MyThingsFilter.MISSED, {}, { selectedId = it })
+            }
+        }
+
+        composeRule.onNodeWithText("Missed passport").performClick()
+        composeRule.runOnIdle { assertEquals("missed", selectedId) }
+        composeRule.onAllNodesWithText("Normal passport").assertCountEquals(0)
+    }
+
     private fun selected() = SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)
 
-    private fun thing(id: String, name: String, status: ThingStatus) = Thing(
+    private fun thing(
+        id: String,
+        name: String,
+        status: ThingStatus,
+        deliveryState: ReminderDeliveryState = ReminderDeliveryState.NONE
+    ) = Thing(
         id = id,
         name = name,
         category = ThingCategory.DOCUMENT,
@@ -107,6 +146,7 @@ class MyThingsScreenTest {
         notes = null,
         createdAtEpochMillis = 1L,
         updatedAtEpochMillis = 1L,
-        status = status
+        status = status,
+        reminderDeliveryState = deliveryState
     )
 }

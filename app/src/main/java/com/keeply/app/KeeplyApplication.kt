@@ -5,6 +5,7 @@ import com.keeply.app.data.ThingRepository
 import com.keeply.app.data.local.KeeplyDatabase
 import com.keeply.app.notifications.AndroidReminderScheduler
 import com.keeply.app.notifications.ReminderSyncCoordinator
+import com.keeply.app.notifications.MissedReminderRecovery
 import com.keeply.app.notifications.createReminderChannel
 import com.keeply.app.notifications.reminderLog
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +19,9 @@ class KeeplyApplication : Application() {
     val thingRepository: ThingRepository by lazy { ThingRepository(database.thingDao()) }
     internal val reminderSyncCoordinator: ReminderSyncCoordinator by lazy {
         ReminderSyncCoordinator(AndroidReminderScheduler(this))
+    }
+    internal val missedReminderRecovery: MissedReminderRecovery by lazy {
+        MissedReminderRecovery(this, thingRepository, reminderSyncCoordinator)
     }
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -36,7 +40,7 @@ class KeeplyApplication : Application() {
     internal suspend fun reconcileRemindersNow() {
         val things = thingRepository.things.first()
         reminderLog("reconcile start thingCount=${things.size}")
-        reminderSyncCoordinator.syncAll(things)
+        missedReminderRecovery.reconcile(things)
         reminderLog("reconcile complete thingCount=${things.size}")
     }
 }

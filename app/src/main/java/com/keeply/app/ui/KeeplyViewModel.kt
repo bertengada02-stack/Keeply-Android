@@ -9,6 +9,7 @@ import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.Thing
 import com.keeply.app.notifications.ReminderSyncCoordinator
 import com.keeply.app.notifications.ReminderSyncResult
+import com.keeply.app.notifications.MissedReminderRecovery
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,7 +60,8 @@ internal sealed interface ItemDetailsState {
 
 class KeeplyViewModel internal constructor(
     private val repository: ThingRepository,
-    private val reminderSyncCoordinator: ReminderSyncCoordinator
+    private val reminderSyncCoordinator: ReminderSyncCoordinator,
+    private val missedReminderRecovery: MissedReminderRecovery
 ) : ViewModel() {
     val things: StateFlow<List<Thing>> = repository.things.stateIn(
         scope = viewModelScope,
@@ -190,7 +192,7 @@ class KeeplyViewModel internal constructor(
     }
 
     internal fun reconcileReminders() {
-        viewModelScope.launch { reminderSyncCoordinator.syncAll(repository.things.first()) }
+        viewModelScope.launch { missedReminderRecovery.reconcile(repository.things.first()) }
     }
 
     private fun runLifecycleChange(success: LifecycleEvent, operation: suspend () -> Unit) {
@@ -213,13 +215,14 @@ class KeeplyViewModel internal constructor(
     companion object {
         internal fun factory(
             repository: ThingRepository,
-            reminderSyncCoordinator: ReminderSyncCoordinator
+            reminderSyncCoordinator: ReminderSyncCoordinator,
+            missedReminderRecovery: MissedReminderRecovery
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     require(modelClass.isAssignableFrom(KeeplyViewModel::class.java))
-                    return KeeplyViewModel(repository, reminderSyncCoordinator) as T
+                    return KeeplyViewModel(repository, reminderSyncCoordinator, missedReminderRecovery) as T
                 }
             }
     }

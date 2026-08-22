@@ -59,7 +59,8 @@ data class Thing(
     val status: ThingStatus = ThingStatus.ACTIVE,
     val nextReminderAtEpochMillis: Long? = null,
     val nextReminderTimeZoneId: String? = null,
-    val originalReminderActionable: Boolean = false
+    val originalReminderActionable: Boolean = false,
+    val reminderDeliveryState: ReminderDeliveryState = ReminderDeliveryState.NONE
 )
 
 data class NewThingDraft(

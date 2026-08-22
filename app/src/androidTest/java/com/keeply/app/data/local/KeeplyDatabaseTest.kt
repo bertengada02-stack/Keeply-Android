@@ -205,9 +205,72 @@ class KeeplyDatabaseTest {
         assertEquals("vehicle", database!!.thingDao().findById("vehicle")?.id)
     }
 
+    @Test
+    fun migrationFromThreeToFourInitializesDeliveryStateFromActionableReminder() {
+        context.deleteDatabase(TEST_DATABASE)
+        context.openOrCreateDatabase(TEST_DATABASE, Context.MODE_PRIVATE, null).use { legacy ->
+            legacy.execSQL("""
+                CREATE TABLE IF NOT EXISTS `things` (
+                    `id` TEXT NOT NULL, `name` TEXT NOT NULL, `categoryCode` TEXT NOT NULL,
+                    `importantDate` TEXT NOT NULL, `reminderTypeCode` TEXT,
+                    `reminderAtEpochMillis` INTEGER, `reminderTimeZoneId` TEXT, `notes` TEXT,
+                    `statusCode` TEXT NOT NULL DEFAULT 'ACTIVE',
+                    `nextReminderAtEpochMillis` INTEGER, `nextReminderTimeZoneId` TEXT,
+                    `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL,
+                    `originalReminderActionable` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`id`)
+                )
+            """.trimIndent())
+            fun insert(id: String, status: String, originalActionable: Int, nextEpoch: Long?) {
+                legacy.execSQL(
+                    "INSERT INTO things VALUES (?, ?, 'DOCUMENT', '2027-01-01', 'CUSTOM', 5000, 'UTC', NULL, ?, ?, 'UTC', 1, 1, ?)",
+                    arrayOf<Any?>(id, id, status, nextEpoch, originalActionable)
+                )
+            }
+            insert("active-reminder", "ACTIVE", 1, null)
+            insert("active-none", "ACTIVE", 0, null)
+            insert("progress", "IN_PROGRESS", 0, 7_000L)
+            insert("done", "DONE", 0, null)
+            legacy.version = 3
+        }
+
+        database = openPersistentDatabase()
+        runBlocking {
+            assertEquals("PENDING", database!!.thingDao().findById("active-reminder")?.reminderDeliveryStateCode)
+            assertEquals("NONE", database!!.thingDao().findById("active-none")?.reminderDeliveryStateCode)
+            assertEquals("PENDING", database!!.thingDao().findById("progress")?.reminderDeliveryStateCode)
+            assertEquals("NONE", database!!.thingDao().findById("done")?.reminderDeliveryStateCode)
+        }
+    }
+
+    @Test
+    fun deliveryTransitionsRequireCurrentPendingReminderAndPersist() = runBlocking {
+        context.deleteDatabase(TEST_DATABASE)
+        database = openPersistentDatabase()
+        val dao = database!!.thingDao()
+        dao.insert(entity("passport", "DOCUMENT", reminder = true))
+        dao.insert(entity("vehicle", "VEHICLE", reminder = true))
+        val expectedEpoch = entity("passport", "DOCUMENT", reminder = true).reminderAtEpochMillis!!
+
+        assertEquals(0, dao.markReminderMissed("passport", expectedEpoch - 1))
+        assertEquals(1, dao.markReminderMissed("passport", expectedEpoch))
+        assertEquals(0, dao.markReminderDelivered("passport", expectedEpoch))
+        assertEquals("MISSED_UNANNOUNCED", dao.findById("passport")?.reminderDeliveryStateCode)
+        assertEquals("PENDING", dao.findById("vehicle")?.reminderDeliveryStateCode)
+
+        database!!.close()
+        database = openPersistentDatabase()
+        assertEquals("MISSED_UNANNOUNCED", database!!.thingDao().findById("passport")?.reminderDeliveryStateCode)
+        assertEquals("PENDING", database!!.thingDao().findById("vehicle")?.reminderDeliveryStateCode)
+    }
+
     private fun openPersistentDatabase(): KeeplyDatabase =
         Room.databaseBuilder(context, KeeplyDatabase::class.java, TEST_DATABASE)
-            .addMigrations(KeeplyDatabase.MIGRATION_1_2, KeeplyDatabase.MIGRATION_2_3)
+            .addMigrations(
+                KeeplyDatabase.MIGRATION_1_2,
+                KeeplyDatabase.MIGRATION_2_3,
+                KeeplyDatabase.MIGRATION_3_4
+            )
             .build()
 
     private fun entity(id: String, categoryCode: String, reminder: Boolean) = ThingEntity(
@@ -222,8 +285,10 @@ class KeeplyDatabaseTest {
         statusCode = "ACTIVE",
         nextReminderAtEpochMillis = null,
         nextReminderTimeZoneId = null,
+        originalReminderActionable = reminder,
         createdAtEpochMillis = if (id == "passport") 1L else 2L,
-        updatedAtEpochMillis = if (id == "passport") 1L else 2L
+        updatedAtEpochMillis = if (id == "passport") 1L else 2L,
+        reminderDeliveryStateCode = if (reminder) "PENDING" else "NONE"
     )
 
     private companion object {

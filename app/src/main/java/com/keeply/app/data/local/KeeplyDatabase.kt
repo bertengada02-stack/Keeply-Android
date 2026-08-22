@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ThingEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class KeeplyDatabase : RoomDatabase() {
@@ -21,7 +21,7 @@ abstract class KeeplyDatabase : RoomDatabase() {
                 context.applicationContext,
                 KeeplyDatabase::class.java,
                 "keeply.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -37,6 +37,18 @@ abstract class KeeplyDatabase : RoomDatabase() {
                 db.execSQL("""
                     UPDATE things SET originalReminderActionable = 1
                     WHERE statusCode = 'ACTIVE' AND reminderTypeCode IS NOT NULL
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE things ADD COLUMN reminderDeliveryStateCode TEXT NOT NULL DEFAULT 'NONE'")
+                db.execSQL("""
+                    UPDATE things SET reminderDeliveryStateCode = 'PENDING'
+                    WHERE (statusCode = 'ACTIVE' AND originalReminderActionable = 1
+                        AND reminderTypeCode IS NOT NULL AND reminderAtEpochMillis IS NOT NULL)
+                       OR (statusCode = 'IN_PROGRESS' AND nextReminderAtEpochMillis IS NOT NULL)
                 """.trimIndent())
             }
         }

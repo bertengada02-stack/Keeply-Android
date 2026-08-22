@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -48,11 +49,14 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,6 +72,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.stateDescription
@@ -81,11 +86,23 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.keeply.app.R
 import com.keeply.app.model.Thing
+import com.keeply.app.model.actionableReminder
 import com.keeply.app.notifications.ReminderSyncResult
+import com.keeply.app.notifications.XiaomiGuidanceFlowState
+import com.keeply.app.notifications.acknowledgeXiaomiAutostartGuidance
+import com.keeply.app.notifications.afterNotificationFlowSettled
+import com.keeply.app.notifications.openXiaomiAutostartSettings
+import com.keeply.app.notifications.shouldOfferXiaomiAutostartGuidance
+import com.keeply.app.notifications.xiaomiAutostartGuidanceAcknowledged
+import com.keeply.app.notifications.xiaomiGuidanceStateAfterCreate
 import com.keeply.app.ui.theme.KeeplyTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class AppDestination {
     HOME,
@@ -100,9 +117,13 @@ private enum class AppDestination {
 fun KeeplyApp(
     viewModel: KeeplyViewModel? = null,
     requestedThingId: String? = null,
-    onRequestedThingConsumed: () -> Unit = {}
+    onRequestedThingConsumed: () -> Unit = {},
+    requestedMissedThings: Boolean = false,
+    onRequestedMissedThingsConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
     var showStartup by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
     var previousPrimaryDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
@@ -125,12 +146,36 @@ fun KeeplyApp(
     val isChangingLifecycle = viewModel?.isChangingLifecycle?.collectAsStateWithLifecycle()?.value ?: false
     var pendingPermissionSuccess by remember { mutableStateOf<String?>(null) }
     var permissionOutcome by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var xiaomiGuidanceFlowState by remember { mutableStateOf(XiaomiGuidanceFlowState.IDLE) }
+    var showXiaomiGuidance by rememberSaveable { mutableStateOf(false) }
+    var appIsResumed by remember {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         val successMessage = pendingPermissionSuccess
         pendingPermissionSuccess = null
         if (successMessage != null) permissionOutcome = granted to successMessage
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) appIsResumed = true
+            if (event == Lifecycle.Event.ON_PAUSE) appIsResumed = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(xiaomiGuidanceFlowState, appIsResumed) {
+        if (xiaomiGuidanceFlowState == XiaomiGuidanceFlowState.READY_TO_SHOW && appIsResumed) {
+            delay(250)
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                xiaomiGuidanceFlowState = XiaomiGuidanceFlowState.IDLE
+                showXiaomiGuidance = true
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -147,10 +192,21 @@ fun KeeplyApp(
         }
     }
 
+    LaunchedEffect(showStartup, requestedMissedThings, viewModel) {
+        if (!showStartup && requestedMissedThings) {
+            selectedThingId = null
+            viewModel?.clearSelectedThing()
+            viewModel?.selectMyThingsFilter(MyThingsFilter.MISSED)
+            destination = AppDestination.MY_THINGS
+            onRequestedMissedThingsConsumed()
+        }
+    }
+
     suspend fun showReminderFeedback(
         result: ReminderSyncResult,
         successMessage: String
-    ) {
+    ): Boolean {
+        var permissionRequestStarted = false
         when (result) {
             ReminderSyncResult.NotificationsDisabled -> {
                 if (
@@ -163,6 +219,7 @@ fun KeeplyApp(
                 ) {
                     markNotificationPermissionRequested(context)
                     pendingPermissionSuccess = successMessage
+                    permissionRequestStarted = true
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
                     val snackbarResult = snackbarHostState.showSnackbar(
@@ -188,6 +245,7 @@ fun KeeplyApp(
             ReminderSyncResult.Past,
             ReminderSyncResult.ScheduledExact -> snackbarHostState.showSnackbar(successMessage)
         }
+        return permissionRequestStarted
     }
 
     LaunchedEffect(permissionOutcome) {
@@ -207,6 +265,7 @@ fun KeeplyApp(
             )
             if (result == SnackbarResult.ActionPerformed) openNotificationSettings(context)
         }
+        xiaomiGuidanceFlowState = xiaomiGuidanceFlowState.afterNotificationFlowSettled()
     }
 
     LaunchedEffect(viewModel) {
@@ -215,9 +274,19 @@ fun KeeplyApp(
                 is SaveThingEvent.Saved -> {
                     saveError = null
                     destination = AppDestination.MY_THINGS
-                    showReminderFeedback(
+                    val shouldOfferXiaomiGuidance = shouldOfferXiaomiAutostartGuidance(
+                        manufacturer = Build.MANUFACTURER,
+                        brand = Build.BRAND,
+                        hasActionableReminder = event.thing.actionableReminder() != null,
+                        acknowledged = xiaomiAutostartGuidanceAcknowledged(context)
+                    )
+                    val permissionRequestStarted = showReminderFeedback(
                         event.reminderSyncResult,
                         event.thing.persistenceSuccessMessage()
+                    )
+                    xiaomiGuidanceFlowState = xiaomiGuidanceStateAfterCreate(
+                        shouldOffer = shouldOfferXiaomiGuidance,
+                        notificationPermissionFlowStarted = permissionRequestStarted
                     )
                 }
                 SaveThingEvent.Failed -> {
@@ -428,6 +497,48 @@ fun KeeplyApp(
             }
         }
     }
+
+    if (showXiaomiGuidance) {
+        XiaomiAutostartGuidanceDialog(
+            onOpenSettings = {
+                acknowledgeXiaomiAutostartGuidance(context)
+                showXiaomiGuidance = false
+                if (!openXiaomiAutostartSettings(context)) {
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            context.getString(R.string.xiaomi_autostart_guidance_fallback)
+                        )
+                    }
+                }
+            },
+            onNotNow = {
+                acknowledgeXiaomiAutostartGuidance(context)
+                showXiaomiGuidance = false
+            }
+        )
+    }
+}
+
+@Composable
+internal fun XiaomiAutostartGuidanceDialog(
+    onOpenSettings: () -> Unit,
+    onNotNow: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.xiaomi_autostart_guidance_title)) },
+        text = { Text(stringResource(R.string.xiaomi_autostart_guidance_body)) },
+        confirmButton = {
+            TextButton(onClick = onOpenSettings) {
+                Text(stringResource(R.string.xiaomi_autostart_guidance_open_settings))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onNotNow) {
+                Text(stringResource(R.string.xiaomi_autostart_guidance_not_now))
+            }
+        }
+    )
 }
 
 @Composable
@@ -886,6 +997,7 @@ private fun FilterEmptyState(filter: MyThingsFilter, modifier: Modifier = Modifi
             "Things you're still keeping track of will appear here."
         MyThingsFilter.COMPLETED -> "Nothing completed yet" to
             "Things you mark as done will appear here."
+        MyThingsFilter.MISSED -> "No missed reminders" to "You're all caught up."
         MyThingsFilter.ALL -> "No things to show" to "Your saved things will appear here."
     }
     Column(

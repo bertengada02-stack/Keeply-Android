@@ -33,7 +33,8 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
                 }
                 if (thing.matchesExpectedReminder(expectedEpoch)) {
                     reminderLog("receiver validation passed thingId=$thingId epoch=$expectedEpoch")
-                    postThingReminder(context, thing)
+                    val app = context.applicationContext as KeeplyApplication
+                    app.missedReminderRecovery.handleDueReminder(thing, expectedEpoch)
                 } else {
                     reminderLog("receiver validation rejected stale reminder thingId=$thingId epoch=$expectedEpoch")
                 }
@@ -53,5 +54,7 @@ internal fun Thing.matchesExpectedReminder(expectedEpoch: Long): Boolean {
         is ActionableReminder.FollowUp -> reminder.atEpochMillis
         null -> null
     }
-    return expectedEpoch > 0L && currentEpoch == expectedEpoch
+    return expectedEpoch > 0L &&
+        reminderDeliveryState == com.keeply.app.model.ReminderDeliveryState.PENDING &&
+        currentEpoch == expectedEpoch
 }

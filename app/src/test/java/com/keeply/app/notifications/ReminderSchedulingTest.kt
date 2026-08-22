@@ -1,6 +1,7 @@
 package com.keeply.app.notifications
 
 import com.keeply.app.model.ReminderType
+import com.keeply.app.model.ReminderDeliveryState
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
 import com.keeply.app.model.ThingStatus
@@ -62,6 +63,34 @@ class ReminderSchedulingTest {
     }
 
     @Test
+    fun deliveredAndAlreadyMissedRemindersAreNeverRescheduledOrReclassifiedByTime() {
+        val pending = thing(originalAt = 3_000L, originalActionable = true)
+        assertEquals(ReminderScheduleDecision.Past(3_000L), pending.reminderScheduleDecision(4_000L))
+        assertEquals(
+            ReminderScheduleDecision.None,
+            pending.copy(reminderDeliveryState = ReminderDeliveryState.DELIVERED)
+                .reminderScheduleDecision(4_000L)
+        )
+        assertEquals(
+            ReminderScheduleDecision.None,
+            pending.copy(reminderDeliveryState = ReminderDeliveryState.MISSED_ANNOUNCED)
+                .reminderScheduleDecision(4_000L)
+        )
+    }
+
+    @Test
+    fun replacedEpochIsTheOnlyReceiverIdentityThatCanValidate() {
+        val replacement = thing(
+            status = ThingStatus.IN_PROGRESS,
+            originalAt = 2_000L,
+            originalActionable = false,
+            nextAt = 5_000L
+        )
+        assertEquals(false, replacement.matchesExpectedReminder(2_000L))
+        assertEquals(true, replacement.matchesExpectedReminder(5_000L))
+    }
+
+    @Test
     fun coordinatorReplacesBySyncAndCancelsByStableThingId() {
         val scheduler = RecordingScheduler()
         val coordinator = ReminderSyncCoordinator(scheduler)
@@ -120,6 +149,11 @@ class ReminderSchedulingTest {
         status = status,
         nextReminderAtEpochMillis = nextAt,
         nextReminderTimeZoneId = nextAt?.let { "Asia/Singapore" },
-        originalReminderActionable = originalActionable
+        originalReminderActionable = originalActionable,
+        reminderDeliveryState = if (originalActionable || nextAt != null) {
+            ReminderDeliveryState.PENDING
+        } else {
+            ReminderDeliveryState.NONE
+        }
     )
 }

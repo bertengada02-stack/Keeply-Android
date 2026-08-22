@@ -4,6 +4,7 @@ import com.keeply.app.data.local.ThingDao
 import com.keeply.app.data.local.ThingEntity
 import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.ReminderType
+import com.keeply.app.model.ReminderDeliveryState
 import com.keeply.app.model.ThingCategory
 import com.keeply.app.model.ThingStatus
 import kotlinx.coroutines.flow.Flow
@@ -45,6 +46,7 @@ class ThingRepositoryTest {
         assertEquals(1234L, dao.inserted.single().createdAtEpochMillis)
         assertEquals(1234L, dao.inserted.single().updatedAtEpochMillis)
         assertTrue(created.originalReminderActionable)
+        assertEquals(ReminderDeliveryState.PENDING, created.reminderDeliveryState)
     }
 
     @Test
@@ -69,6 +71,7 @@ class ThingRepositoryTest {
         assertNull(entity.reminderAtEpochMillis)
         assertNull(entity.reminderTimeZoneId)
         assertEquals(false, entity.originalReminderActionable)
+        assertEquals("NONE", entity.reminderDeliveryStateCode)
         assertEquals("Store in cabinet", entity.notes)
     }
 
@@ -408,6 +411,91 @@ class ThingRepositoryTest {
         assertEquals(1_000L, updated.nextReminderAtEpochMillis)
     }
 
+    @Test
+    fun guardedDeliveryAndMissedUpdatesRequireCurrentPendingEpoch() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+            reminderTypeCode = "CUSTOM",
+            reminderAtEpochMillis = 5_000L,
+            reminderTimeZoneId = "UTC",
+            originalReminderActionable = true,
+            reminderDeliveryStateCode = "PENDING"
+        ))
+        val repository = ThingRepository(dao)
+
+        assertEquals(false, repository.markReminderDelivered("passport", 4_000L))
+        assertEquals(true, repository.markReminderDelivered("passport", 5_000L))
+        assertEquals(ReminderDeliveryState.DELIVERED, repository.findById("passport")?.reminderDeliveryState)
+        assertEquals(false, repository.markReminderMissed("passport", 5_000L))
+    }
+
+    @Test
+    fun unrelatedEditPreservesMissedWhileNewOrRemovedReminderClearsIt() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+            reminderTypeCode = "CUSTOM",
+            reminderAtEpochMillis = 5_000L,
+            reminderTimeZoneId = "UTC",
+            originalReminderActionable = true,
+            reminderDeliveryStateCode = "MISSED_ANNOUNCED"
+        ))
+        val repository = ThingRepository(dao, clock = { 100L })
+
+        repository.updateThing("passport", draft(
+            name = "Updated passport",
+            reminderType = ReminderType.CUSTOM,
+            reminderMillis = 5_000L,
+            reminderZone = "UTC"
+        ))
+        assertEquals("MISSED_ANNOUNCED", dao.findById("passport")?.reminderDeliveryStateCode)
+
+        repository.updateThing("passport", draft(
+            name = "Updated passport",
+            reminderType = ReminderType.CUSTOM,
+            reminderMillis = 6_000L,
+            reminderZone = "UTC",
+            reminderExplicitlySelected = true
+        ))
+        assertEquals("PENDING", dao.findById("passport")?.reminderDeliveryStateCode)
+
+        repository.updateThing("passport", draft(name = "Updated passport"))
+        assertEquals("NONE", dao.findById("passport")?.reminderDeliveryStateCode)
+    }
+
+    @Test
+    fun meaningfulLifecycleActionsClearOrReplaceMissedState() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("passport", "DOCUMENT").copy(
+            reminderTypeCode = "CUSTOM",
+            reminderAtEpochMillis = 5_000L,
+            reminderTimeZoneId = "UTC",
+            originalReminderActionable = true,
+            reminderDeliveryStateCode = "MISSED_ANNOUNCED"
+        ))
+        val repository = ThingRepository(dao, clock = { 100L })
+
+        repository.remindAgain("passport", 8_000L, "UTC")
+        assertEquals("PENDING", dao.findById("passport")?.reminderDeliveryStateCode)
+        repository.markDone("passport")
+        assertEquals("NONE", dao.findById("passport")?.reminderDeliveryStateCode)
+        repository.reopen("passport")
+        assertEquals("NONE", dao.findById("passport")?.reminderDeliveryStateCode)
+    }
+
+    @Test
+    fun missedAnnouncementUpdatesOnlyUnannouncedCapturedRows() = runBlocking {
+        val dao = FakeThingDao()
+        dao.insert(sampleEntity("one", "DOCUMENT").copy(reminderDeliveryStateCode = "MISSED_UNANNOUNCED"))
+        dao.insert(sampleEntity("two", "DOCUMENT").copy(reminderDeliveryStateCode = "MISSED_ANNOUNCED"))
+        val repository = ThingRepository(dao)
+
+        assertEquals(listOf("one"), repository.unannouncedMissedThings().map { it.id })
+        assertEquals(setOf("one", "two"), repository.allMissedThings().map { it.id }.toSet())
+        repository.markMissedAnnounced(listOf("one"))
+        assertEquals("MISSED_ANNOUNCED", dao.findById("one")?.reminderDeliveryStateCode)
+        assertEquals("MISSED_ANNOUNCED", dao.findById("two")?.reminderDeliveryStateCode)
+    }
+
     private fun draft(
         name: String = "passport",
         category: ThingCategory = ThingCategory.DOCUMENT,
@@ -462,6 +550,12 @@ private class FakeThingDao : ThingDao {
     override fun observeById(id: String): Flow<ThingEntity?> =
         values.map { entities -> entities.firstOrNull { it.id == id } }
 
+    override suspend fun findUnannouncedMissed(): List<ThingEntity> =
+        inserted.filter { it.reminderDeliveryStateCode == "MISSED_UNANNOUNCED" }
+
+    override suspend fun findAllMissed(): List<ThingEntity> =
+        inserted.filter { it.reminderDeliveryStateCode in setOf("MISSED_UNANNOUNCED", "MISSED_ANNOUNCED") }
+
     override suspend fun update(thing: ThingEntity): Int {
         val index = inserted.indexOfFirst { it.id == thing.id }
         if (index < 0) return 0
@@ -474,19 +568,48 @@ private class FakeThingDao : ThingDao {
     override suspend fun remindAgain(id: String, nextReminderAtEpochMillis: Long, nextReminderTimeZoneId: String, updatedAtEpochMillis: Long): Int {
         val current = findById(id) ?: return 0
         if (current.statusCode == ThingStatus.DONE.code) return 0
-        return update(current.copy(statusCode = ThingStatus.IN_PROGRESS.code, originalReminderActionable = false, nextReminderAtEpochMillis = nextReminderAtEpochMillis, nextReminderTimeZoneId = nextReminderTimeZoneId, updatedAtEpochMillis = updatedAtEpochMillis))
+        return update(current.copy(statusCode = ThingStatus.IN_PROGRESS.code, originalReminderActionable = false, nextReminderAtEpochMillis = nextReminderAtEpochMillis, nextReminderTimeZoneId = nextReminderTimeZoneId, reminderDeliveryStateCode = "PENDING", updatedAtEpochMillis = updatedAtEpochMillis))
     }
 
     override suspend fun markDone(id: String, updatedAtEpochMillis: Long): Int {
         val current = findById(id) ?: return 0
         if (current.statusCode == ThingStatus.DONE.code) return 0
-        return update(current.copy(statusCode = ThingStatus.DONE.code, originalReminderActionable = false, nextReminderAtEpochMillis = null, nextReminderTimeZoneId = null, updatedAtEpochMillis = updatedAtEpochMillis))
+        return update(current.copy(statusCode = ThingStatus.DONE.code, originalReminderActionable = false, nextReminderAtEpochMillis = null, nextReminderTimeZoneId = null, reminderDeliveryStateCode = "NONE", updatedAtEpochMillis = updatedAtEpochMillis))
     }
 
     override suspend fun reopen(id: String, updatedAtEpochMillis: Long): Int {
         val current = findById(id) ?: return 0
         if (current.statusCode != ThingStatus.DONE.code) return 0
-        return update(current.copy(statusCode = ThingStatus.ACTIVE.code, originalReminderActionable = false, nextReminderAtEpochMillis = null, nextReminderTimeZoneId = null, updatedAtEpochMillis = updatedAtEpochMillis))
+        return update(current.copy(statusCode = ThingStatus.ACTIVE.code, originalReminderActionable = false, nextReminderAtEpochMillis = null, nextReminderTimeZoneId = null, reminderDeliveryStateCode = "NONE", updatedAtEpochMillis = updatedAtEpochMillis))
+    }
+
+
+    override suspend fun markReminderDelivered(id: String, expectedEpoch: Long): Int =
+        updateDeliveryState(id, expectedEpoch, "DELIVERED")
+
+    override suspend fun markReminderMissed(id: String, expectedEpoch: Long): Int =
+        updateDeliveryState(id, expectedEpoch, "MISSED_UNANNOUNCED")
+
+    override suspend fun markMissedAnnounced(ids: List<String>): Int {
+        var changed = 0
+        ids.forEach { id ->
+            val current = findById(id)
+            if (current?.reminderDeliveryStateCode == "MISSED_UNANNOUNCED") {
+                update(current.copy(reminderDeliveryStateCode = "MISSED_ANNOUNCED"))
+                changed += 1
+            }
+        }
+        return changed
+    }
+
+    private suspend fun updateDeliveryState(id: String, expectedEpoch: Long, state: String): Int {
+        val current = findById(id) ?: return 0
+        val matches = current.reminderDeliveryStateCode == "PENDING" && when (current.statusCode) {
+            ThingStatus.ACTIVE.code -> current.originalReminderActionable && current.reminderAtEpochMillis == expectedEpoch
+            ThingStatus.IN_PROGRESS.code -> current.nextReminderAtEpochMillis == expectedEpoch
+            else -> false
+        }
+        return if (matches) update(current.copy(reminderDeliveryStateCode = state)) else 0
     }
 
     override suspend fun deleteById(id: String): Int {

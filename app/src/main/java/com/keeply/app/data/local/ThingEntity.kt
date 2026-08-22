@@ -19,5 +19,6 @@ data class ThingEntity(
     val nextReminderTimeZoneId: String?,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
-    @ColumnInfo(defaultValue = "0") val originalReminderActionable: Boolean = false
+    @ColumnInfo(defaultValue = "0") val originalReminderActionable: Boolean = false,
+    @ColumnInfo(defaultValue = "'NONE'") val reminderDeliveryStateCode: String = "NONE"
 )
