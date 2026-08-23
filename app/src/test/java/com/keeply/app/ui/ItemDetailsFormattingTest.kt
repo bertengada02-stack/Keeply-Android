@@ -94,6 +94,33 @@ class ItemDetailsFormattingTest {
     }
 
     @Test
+    fun detailsIncludeImportantDateUrgencyWithoutUsingReminderTime() {
+        val futureReminder = localMillis(TimeZone.getTimeZone("UTC"))
+        val overdue = thing(
+            reminderType = ReminderType.CUSTOM,
+            reminderMillis = futureReminder,
+            reminderTimeZoneId = "UTC",
+            originalReminderActionable = true
+        ).copy(importantDate = "2026-08-17")
+
+        val overdueDetails = overdue.toItemDetailsUiModel(
+            deviceTimeZone = TimeZone.getTimeZone("UTC"),
+            locale = Locale.US,
+            currentLocalDate = "2026-08-22"
+        )
+        assertEquals(ImportantDateUrgency.OVERDUE, overdueDetails.importantDateContext?.urgency)
+        assertEquals("5 days overdue", overdueDetails.importantDateContext?.timingText)
+
+        val approaching = overdue.copy(importantDate = "2026-08-30").toItemDetailsUiModel(
+            deviceTimeZone = TimeZone.getTimeZone("UTC"),
+            locale = Locale.US,
+            currentLocalDate = "2026-08-22"
+        )
+        assertEquals(ImportantDateUrgency.APPROACHING, approaching.importantDateContext?.urgency)
+        assertEquals("In 8 days", approaching.importantDateContext?.timingText)
+    }
+
+    @Test
     fun detailsSelectsReminderSourceFromLifecycleState() {
         val active = thing(
             reminderType = ReminderType.ON_DAY,

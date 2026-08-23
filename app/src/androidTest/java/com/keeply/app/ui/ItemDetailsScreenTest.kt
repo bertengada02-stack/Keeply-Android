@@ -59,6 +59,29 @@ class ItemDetailsScreenTest {
         composeRule.onAllNodesWithText("Reopen").assertCountEquals(0)
     }
 
+    @Test
+    fun urgencyAppearsBelowNameWhileExistingFieldsRemain() {
+        composeRule.setContent {
+            KeeplyTheme {
+                ItemDetailsScreen(
+                    state = ItemDetailsState.Content(
+                        thing(ThingStatus.ACTIVE).copy(importantDate = "2026-08-30")
+                    ),
+                    onBack = {}, onEdit = {}, onRemindAgain = { _, _ -> },
+                    onMarkDone = {}, onReopen = {}, onDelete = {},
+                    isChangingLifecycle = false, lifecycleError = null,
+                    currentLocalDate = "2026-08-22"
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("APPROACHING").assertIsDisplayed()
+        composeRule.onNodeWithText(" · In 8 days").assertIsDisplayed()
+        composeRule.onNodeWithText("Expiration date").assertIsDisplayed()
+        composeRule.onNodeWithText("Aug 30, 2026").assertIsDisplayed()
+        composeRule.onNodeWithText("Reminder").assertIsDisplayed()
+    }
+
     private fun thing(status: ThingStatus) = Thing(
         id = "passport",
         name = "Passport",

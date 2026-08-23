@@ -16,6 +16,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,11 +41,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -69,12 +74,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -91,6 +103,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.keeply.app.R
 import com.keeply.app.model.Thing
+import com.keeply.app.model.ThingCategory
+import com.keeply.app.model.ThingStatus
 import com.keeply.app.model.actionableReminder
 import com.keeply.app.notifications.ReminderSyncResult
 import com.keeply.app.notifications.XiaomiGuidanceFlowState
@@ -133,12 +147,18 @@ fun KeeplyApp(
     }
     var saveError by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedThingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var itemDetailsBackDestination by rememberSaveable {
+        mutableStateOf(AppDestination.MY_THINGS)
+    }
     var updateError by rememberSaveable { mutableStateOf<String?>(null) }
     var lifecycleError by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val things = viewModel?.things?.collectAsStateWithLifecycle()?.value.orEmpty()
     val myThingsFilter = viewModel?.myThingsFilter?.collectAsStateWithLifecycle()?.value
         ?: MyThingsFilter.ALL
+    val myThingsCategory = viewModel?.myThingsCategory?.collectAsStateWithLifecycle()?.value
+    val myThingsSearchQuery = viewModel?.myThingsSearchQuery?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val myThingsSearchActive = viewModel?.myThingsSearchActive?.collectAsStateWithLifecycle()?.value ?: false
     val isSaving = viewModel?.isSaving?.collectAsStateWithLifecycle()?.value ?: false
     val itemDetailsState = viewModel?.itemDetailsState?.collectAsStateWithLifecycle()?.value
         ?: ItemDetailsState.NotSelected
@@ -186,6 +206,7 @@ fun KeeplyApp(
     LaunchedEffect(showStartup, requestedThingId, viewModel) {
         if (!showStartup && requestedThingId != null) {
             selectedThingId = requestedThingId
+            itemDetailsBackDestination = AppDestination.MY_THINGS
             destination = AppDestination.ITEM_DETAILS
             viewModel?.selectThing(requestedThingId)
             onRequestedThingConsumed()
@@ -196,7 +217,7 @@ fun KeeplyApp(
         if (!showStartup && requestedMissedThings) {
             selectedThingId = null
             viewModel?.clearSelectedThing()
-            viewModel?.selectMyThingsFilter(MyThingsFilter.MISSED)
+            viewModel?.showAllMissedThings()
             destination = AppDestination.MY_THINGS
             onRequestedMissedThingsConsumed()
         }
@@ -273,6 +294,7 @@ fun KeeplyApp(
             when (event) {
                 is SaveThingEvent.Saved -> {
                     saveError = null
+                    viewModel?.resetMyThingsAfterCreate()
                     destination = AppDestination.MY_THINGS
                     val shouldOfferXiaomiGuidance = shouldOfferXiaomiAutostartGuidance(
                         manufacturer = Build.MANUFACTURER,
@@ -380,6 +402,9 @@ fun KeeplyApp(
     BackHandler(enabled = destination == AppDestination.CATEGORY_SELECTION) {
         destination = previousPrimaryDestination
     }
+    BackHandler(enabled = destination == AppDestination.MY_THINGS && myThingsSearchActive) {
+        viewModel?.closeAndClearMyThingsSearch()
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -395,23 +420,52 @@ fun KeeplyApp(
         }
     ) { innerPadding ->
         when (destination) {
-            AppDestination.HOME -> EmptyHomeScreen(
-                onRememberSomething = openCategorySelection,
-                onCategoryShortcut = { category ->
-                    saveError = null
-                    selectedCategory = category
-                    addThingBackDestination = AppDestination.HOME
-                    destination = AppDestination.ADD_THING
-                },
-                modifier = Modifier.padding(innerPadding)
-            )
+            AppDestination.HOME -> {
+                val homeThings = remember(things) { things.homeEligibleAndOrdered() }
+                if (homeThings.isEmpty()) {
+                    EmptyHomeScreen(
+                        onRememberSomething = openCategorySelection,
+                        onCategoryShortcut = { category ->
+                            saveError = null
+                            selectedCategory = category
+                            addThingBackDestination = AppDestination.HOME
+                            destination = AppDestination.ADD_THING
+                        },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                } else {
+                    PopulatedHomeScreen(
+                        things = homeThings,
+                        onCategoryShortcut = { category ->
+                            saveError = null
+                            selectedCategory = category
+                            addThingBackDestination = AppDestination.HOME
+                            destination = AppDestination.ADD_THING
+                        },
+                        onThingSelected = { thingId ->
+                            selectedThingId = thingId
+                            itemDetailsBackDestination = AppDestination.HOME
+                            destination = AppDestination.ITEM_DETAILS
+                        },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+            }
 
             AppDestination.MY_THINGS -> MyThingsShell(
                 things = things,
                 selectedFilter = myThingsFilter,
+                selectedCategory = myThingsCategory,
+                searchQuery = myThingsSearchQuery,
+                searchActive = myThingsSearchActive,
                 onFilterSelected = { viewModel?.selectMyThingsFilter(it) },
+                onCategorySelected = { viewModel?.selectMyThingsCategory(it) },
+                onSearchRequested = { viewModel?.openMyThingsSearch() },
+                onSearchQueryChanged = { viewModel?.updateMyThingsSearchQuery(it) },
+                onSearchClosed = { viewModel?.closeAndClearMyThingsSearch() },
                 onThingSelected = { thingId ->
                     selectedThingId = thingId
+                    itemDetailsBackDestination = AppDestination.MY_THINGS
                     destination = AppDestination.ITEM_DETAILS
                 },
                 modifier = Modifier.padding(innerPadding)
@@ -443,7 +497,7 @@ fun KeeplyApp(
             AppDestination.ITEM_DETAILS -> ItemDetailsScreen(
                 state = itemDetailsState,
                 onBack = {
-                    destination = AppDestination.MY_THINGS
+                    destination = itemDetailsBackDestination
                     selectedThingId = null
                     viewModel?.clearSelectedThing()
                 },
@@ -488,7 +542,7 @@ fun KeeplyApp(
                 else -> EditThingUnavailableScreen(
                     state = details,
                     onBackToMyThings = {
-                        destination = AppDestination.MY_THINGS
+                        destination = itemDetailsBackDestination
                         selectedThingId = null
                         viewModel?.clearSelectedThing()
                     },
@@ -649,35 +703,206 @@ private fun EmptyHomeScreen(
 }
 
 @Composable
-private fun KeeplyHeader() {
+internal fun PopulatedHomeScreen(
+    things: List<Thing>,
+    onCategoryShortcut: (CategoryGlyph) -> Unit,
+    onThingSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    currentLocalDate: String = currentLocalDateIso()
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 16.dp)
+    ) {
+        KeeplyHeader()
+        Spacer(Modifier.height(20.dp))
+        ExampleThings(
+            heading = "Remember something",
+            onCategoryShortcut = onCategoryShortcut
+        )
+        Spacer(Modifier.height(20.dp))
+        HomeSectionHeading("Coming up")
+        Spacer(Modifier.height(14.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(items = things, key = Thing::id) { thing ->
+                HomeThingCard(
+                    thing = thing,
+                    dateContext = importantDateContext(thing.importantDate, currentLocalDate),
+                    onClick = { onThingSelected(thing.id) }
+                )
+            }
+            item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun HomeThingCard(
+    thing: Thing,
+    dateContext: ImportantDateContext?,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.32f),
+                RoundedCornerShape(14.dp)
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Open ${thing.name} details" }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        CategoryIcon(thing.category.toCategoryGlyph())
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = thing.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "${thing.category.displayName()} · ${formatIsoImportantDate(thing.importantDate)}",
+                modifier = Modifier.padding(top = 3.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            dateContext?.let {
+                UrgencyContextRow(it, Modifier.padding(top = 9.dp))
+            }
+            if (thing.status == ThingStatus.IN_PROGRESS) {
+                val nextReminder = thing.nextReminderAtEpochMillis
+                if (nextReminder != null) {
+                    Text(
+                        text = "Next reminder ${formatFollowUpReminder(nextReminder, thing.nextReminderTimeZoneId)}",
+                        modifier = Modifier.padding(top = 7.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun UrgencyContextRow(
+    context: ImportantDateContext,
+    modifier: Modifier = Modifier
+) {
+    val color = urgencyColor(context.urgency)
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .background(color, CircleShape)
+        )
+        Text(
+            text = context.urgency.label,
+            modifier = Modifier.padding(start = 7.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = color
+        )
+        Text(
+            text = " · ${context.timingText}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun urgencyColor(urgency: ImportantDateUrgency): Color = when (urgency) {
+    ImportantDateUrgency.OVERDUE,
+    ImportantDateUrgency.DUE_TODAY,
+    ImportantDateUrgency.VERY_SOON -> MaterialTheme.colorScheme.error
+    ImportantDateUrgency.APPROACHING -> Color(0xFF8A6500)
+    ImportantDateUrgency.LATER -> Color(0xFF287F60)
+}
+
+@Composable
+private fun KeeplyHeader(
+    searchEnabled: Boolean = false,
+    searchActive: Boolean = false,
+    searchQuery: String = "",
+    onSearchRequested: () -> Unit = {},
+    onSearchQueryChanged: (String) -> Unit = {},
+    onSearchClosed: () -> Unit = {}
+) {
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(searchActive) {
+        if (searchActive) {
+            searchFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Image(
-                painter = painterResource(R.drawable.keeply_header),
-                contentDescription = "Keeply",
-                modifier = Modifier.height(36.dp),
-                contentScale = ContentScale.Fit,
-                alignment = Alignment.CenterStart
+        if (searchActive) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChanged,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .focusRequester(searchFocusRequester)
+                    .semantics { contentDescription = "My Things title search" },
+                placeholder = { Text("Search titles") },
+                shape = CircleShape,
+                singleLine = true
             )
+            TextButton(onClick = {
+                keyboardController?.hide()
+                onSearchClosed()
+            }) { Text("Close") }
+        } else {
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.keeply_header),
+                    contentDescription = "Keeply",
+                    modifier = Modifier.height(36.dp),
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart
+                )
+            }
+            if (searchEnabled) {
+                SearchIcon(onClick = onSearchRequested)
+                Spacer(Modifier.width(20.dp))
+            }
         }
-        SearchIcon()
-        Spacer(Modifier.width(20.dp))
         SettingsIcon()
     }
 }
 
 @Composable
-private fun SearchIcon() {
+private fun SearchIcon(onClick: () -> Unit) {
     val teal = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.size(28.dp).semantics { contentDescription = "Search, unavailable in Milestone 1" }) {
-        drawCircle(teal, size.width * .28f, Offset(size.width * .42f, size.height * .40f), style = Stroke(2.5.dp.toPx()))
-        drawLine(teal, Offset(size.width * .62f, size.height * .61f), Offset(size.width * .85f, size.height * .84f), 2.5.dp.toPx(), StrokeCap.Round)
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Search My Things by title" },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.size(28.dp)) {
+            drawCircle(teal, size.width * .28f, Offset(size.width * .42f, size.height * .40f), style = Stroke(2.5.dp.toPx()))
+            drawLine(teal, Offset(size.width * .62f, size.height * .61f), Offset(size.width * .85f, size.height * .84f), 2.5.dp.toPx(), StrokeCap.Round)
+        }
     }
 }
 
@@ -752,18 +977,17 @@ internal enum class CategoryGlyph {
 }
 
 @Composable
-private fun ExampleThings(onCategoryShortcut: (CategoryGlyph) -> Unit) {
+private fun ExampleThings(
+    onCategoryShortcut: (CategoryGlyph) -> Unit,
+    heading: String = "Examples of things to remember"
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 2.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = "Examples of things to remember",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        HomeSectionHeading(heading)
         val examples = listOf(
             ExampleThing("Documents", "Passport, license", CategoryGlyph.DOCUMENT),
             ExampleThing("Things I own", "Warranty, receipts", CategoryGlyph.OWNED),
@@ -789,6 +1013,15 @@ private fun ExampleThings(onCategoryShortcut: (CategoryGlyph) -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun HomeSectionHeading(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.onSurface
+    )
 }
 
 @Composable
@@ -852,18 +1085,58 @@ internal fun MyThingsShell(
     selectedFilter: MyThingsFilter,
     onFilterSelected: (MyThingsFilter) -> Unit,
     onThingSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectedCategory: ThingCategory? = null,
+    searchQuery: String = "",
+    searchActive: Boolean = false,
+    onCategorySelected: (ThingCategory?) -> Unit = {},
+    onSearchRequested: () -> Unit = {},
+    onSearchQueryChanged: (String) -> Unit = {},
+    onSearchClosed: () -> Unit = {},
+    currentLocalDate: String = currentLocalDateIso()
 ) {
-    val filteredThings = remember(things, selectedFilter) { things.filteredBy(selectedFilter) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val searchFocusDismissModifier = Modifier.pointerInput(searchActive) {
+        awaitEachGesture {
+            awaitFirstDown(pass = PointerEventPass.Initial)
+            if (searchActive) {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+        }
+    }
+    val filteredThings = remember(things, selectedFilter, selectedCategory, searchQuery) {
+        things.filterMyThings(selectedFilter, selectedCategory, searchQuery)
+    }
     if (things.isEmpty()) {
-        EmptyMyThingsShell(selectedFilter, onFilterSelected, modifier)
+        EmptyMyThingsShell(
+            selectedFilter = selectedFilter,
+            selectedCategory = selectedCategory,
+            searchQuery = searchQuery,
+            searchActive = searchActive,
+            onFilterSelected = onFilterSelected,
+            onCategorySelected = onCategorySelected,
+            onSearchRequested = onSearchRequested,
+            onSearchQueryChanged = onSearchQueryChanged,
+            onSearchClosed = onSearchClosed,
+            modifier = modifier.then(searchFocusDismissModifier)
+        )
     } else {
         PopulatedMyThingsShell(
             things = filteredThings,
             selectedFilter = selectedFilter,
+            selectedCategory = selectedCategory,
+            searchQuery = searchQuery,
+            searchActive = searchActive,
             onFilterSelected = onFilterSelected,
+            onCategorySelected = onCategorySelected,
+            onSearchRequested = onSearchRequested,
+            onSearchQueryChanged = onSearchQueryChanged,
+            onSearchClosed = onSearchClosed,
             onThingSelected = onThingSelected,
-            modifier = modifier
+            currentLocalDate = currentLocalDate,
+            modifier = modifier.then(searchFocusDismissModifier)
         )
     }
 }
@@ -871,7 +1144,14 @@ internal fun MyThingsShell(
 @Composable
 private fun EmptyMyThingsShell(
     selectedFilter: MyThingsFilter,
+    selectedCategory: ThingCategory?,
+    searchQuery: String,
+    searchActive: Boolean,
     onFilterSelected: (MyThingsFilter) -> Unit,
+    onCategorySelected: (ThingCategory?) -> Unit,
+    onSearchRequested: () -> Unit,
+    onSearchQueryChanged: (String) -> Unit,
+    onSearchClosed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -880,9 +1160,18 @@ private fun EmptyMyThingsShell(
             .padding(horizontal = 28.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        KeeplyHeader()
+        KeeplyHeader(
+            searchEnabled = true,
+            searchActive = searchActive,
+            searchQuery = searchQuery,
+            onSearchRequested = onSearchRequested,
+            onSearchQueryChanged = onSearchQueryChanged,
+            onSearchClosed = onSearchClosed
+        )
         Spacer(Modifier.height(20.dp))
         MyThingsFilterControl(selectedFilter, onFilterSelected)
+        Spacer(Modifier.height(10.dp))
+        MyThingsCategoryFilter(selectedCategory, onCategorySelected)
         Spacer(Modifier.weight(0.8f))
         ClipboardIllustration()
         Spacer(Modifier.height(26.dp))
@@ -906,8 +1195,16 @@ private fun EmptyMyThingsShell(
 private fun PopulatedMyThingsShell(
     things: List<Thing>,
     selectedFilter: MyThingsFilter,
+    selectedCategory: ThingCategory?,
+    searchQuery: String,
+    searchActive: Boolean,
     onFilterSelected: (MyThingsFilter) -> Unit,
+    onCategorySelected: (ThingCategory?) -> Unit,
+    onSearchRequested: () -> Unit,
+    onSearchQueryChanged: (String) -> Unit,
+    onSearchClosed: () -> Unit,
     onThingSelected: (String) -> Unit,
+    currentLocalDate: String,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -915,7 +1212,14 @@ private fun PopulatedMyThingsShell(
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        KeeplyHeader()
+        KeeplyHeader(
+            searchEnabled = true,
+            searchActive = searchActive,
+            searchQuery = searchQuery,
+            onSearchRequested = onSearchRequested,
+            onSearchQueryChanged = onSearchQueryChanged,
+            onSearchClosed = onSearchClosed
+        )
         Spacer(Modifier.height(28.dp))
         Text(
             text = "My Things",
@@ -924,18 +1228,165 @@ private fun PopulatedMyThingsShell(
         )
         Spacer(Modifier.height(14.dp))
         MyThingsFilterControl(selectedFilter, onFilterSelected)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
+        MyThingsCategoryFilter(selectedCategory, onCategorySelected)
+        Spacer(Modifier.height(14.dp))
         if (things.isEmpty()) {
-            FilterEmptyState(selectedFilter, Modifier.weight(1f))
+            FilterEmptyState(
+                filter = selectedFilter,
+                selectedCategory = selectedCategory,
+                searchQuery = searchQuery,
+                modifier = Modifier.weight(1f)
+            )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(items = things, key = Thing::id) { thing ->
                     ThingSummaryRow(
                         thing = thing,
+                        dateContext = importantDateContext(thing.importantDate, currentLocalDate),
                         onClick = { onThingSelected(thing.id) }
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MyThingsCategoryFilter(
+    selectedCategory: ThingCategory?,
+    onCategorySelected: (ThingCategory?) -> Unit
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val selectedLabel = selectedCategory?.displayName() ?: "All categories"
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Category:",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surface,
+                        RoundedCornerShape(14.dp)
+                    )
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                        RoundedCornerShape(14.dp)
+                    )
+                    .clickable(role = Role.Button) { expanded = true }
+                    .semantics {
+                        contentDescription = "Category filter, $selectedLabel selected"
+                        stateDescription = "$selectedLabel selected"
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = selectedLabel,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (expanded) "▴" else "▾",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                containerColor = Color.White,
+                tonalElevation = 0.dp,
+                shadowElevation = 8.dp
+            ) {
+                val options = listOf<ThingCategory?>(null) + ThingCategory.entries
+                options.forEach { category ->
+                    val label = category?.displayName() ?: "All categories"
+                    val isSelected = category == selectedCategory
+                    DropdownMenuItem(
+                        leadingIcon = {
+                            if (category == null) {
+                                AllCategoriesIcon()
+                            } else {
+                                CategoryIcon(category.toCategoryGlyph())
+                            }
+                        },
+                        text = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = label,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                                if (isSelected) {
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("✓", color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        },
+                        onClick = {
+                            onCategorySelected(category)
+                            expanded = false
+                        },
+                        modifier = Modifier.semantics {
+                            contentDescription = "Filter by $label"
+                            selected = isSelected
+                            stateDescription = if (isSelected) "Selected" else "Not selected"
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AllCategoriesIcon() {
+    val teal = MaterialTheme.colorScheme.primary
+    val iconBackground = MaterialTheme.colorScheme.primaryContainer
+    Canvas(
+        modifier = Modifier
+            .size(34.dp)
+            .semantics { contentDescription = "all categories icon" }
+    ) {
+        drawCircle(iconBackground, size.minDimension / 2f)
+        val squareSize = size.minDimension * 0.16f
+        val strokeWidth = 1.7.dp.toPx()
+        listOf(
+            Offset(size.width * 0.34f, size.height * 0.34f),
+            Offset(size.width * 0.58f, size.height * 0.34f),
+            Offset(size.width * 0.34f, size.height * 0.58f),
+            Offset(size.width * 0.58f, size.height * 0.58f)
+        ).forEach { topLeft ->
+            drawRoundRect(
+                color = teal,
+                topLeft = topLeft,
+                size = Size(squareSize, squareSize),
+                cornerRadius = CornerRadius(1.dp.toPx()),
+                style = Stroke(strokeWidth)
+            )
         }
     }
 }
@@ -991,14 +1442,25 @@ private fun MyThingsFilterControl(
 }
 
 @Composable
-private fun FilterEmptyState(filter: MyThingsFilter, modifier: Modifier = Modifier) {
-    val (title, description) = when (filter) {
+private fun FilterEmptyState(
+    filter: MyThingsFilter,
+    selectedCategory: ThingCategory?,
+    searchQuery: String,
+    modifier: Modifier = Modifier
+) {
+    val (title, description) = when {
+        searchQuery.trim().isNotEmpty() -> "No matching things" to
+            "Try another title or adjust your filters."
+        selectedCategory != null -> "No things in this category" to
+            "Try another category or status."
+        else -> when (filter) {
         MyThingsFilter.ACTIVE -> "No active things" to
             "Things you're still keeping track of will appear here."
         MyThingsFilter.COMPLETED -> "Nothing completed yet" to
             "Things you mark as done will appear here."
         MyThingsFilter.MISSED -> "No missed reminders" to "You're all caught up."
         MyThingsFilter.ALL -> "No things to show" to "Your saved things will appear here."
+        }
     }
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -1017,7 +1479,11 @@ private fun FilterEmptyState(filter: MyThingsFilter, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun ThingSummaryRow(thing: Thing, onClick: () -> Unit) {
+private fun ThingSummaryRow(
+    thing: Thing,
+    dateContext: ImportantDateContext?,
+    onClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1051,8 +1517,29 @@ private fun ThingSummaryRow(thing: Thing, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (thing.status == ThingStatus.DONE) {
+                CompletedThingIndicator(Modifier.padding(top = 7.dp))
+            } else {
+                dateContext?.let {
+                    UrgencyContextRow(
+                        context = it,
+                        modifier = Modifier.padding(top = 7.dp)
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun CompletedThingIndicator(modifier: Modifier = Modifier) {
+    Text(
+        text = "✓ Done",
+        modifier = modifier.semantics { contentDescription = "Completed" },
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = Color(0xFF287F60)
+    )
 }
 
 @Composable

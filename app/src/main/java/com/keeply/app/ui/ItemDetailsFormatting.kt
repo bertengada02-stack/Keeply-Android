@@ -18,6 +18,7 @@ internal data class ItemDetailsUiModel(
     val categoryLabel: String,
     val importantDateLabel: String,
     val importantDateText: String,
+    val importantDateContext: ImportantDateContext?,
     val reminderText: String,
     val statusText: String,
     val notes: String?
@@ -25,13 +26,15 @@ internal data class ItemDetailsUiModel(
 
 internal fun Thing.toItemDetailsUiModel(
     deviceTimeZone: TimeZone = TimeZone.getDefault(),
-    locale: Locale = Locale.getDefault()
+    locale: Locale = Locale.getDefault(),
+    currentLocalDate: String = currentLocalDateIso(timeZone = deviceTimeZone)
 ): ItemDetailsUiModel = ItemDetailsUiModel(
     name = name,
     category = category,
     categoryLabel = category.displayName(),
     importantDateLabel = category.importantDateLabel(),
     importantDateText = formatIsoImportantDate(importantDate),
+    importantDateContext = importantDateContext(importantDate, currentLocalDate),
     reminderText = actionableReminderDisplayText(deviceTimeZone, locale),
     statusText = status.displayName(),
     notes = notes?.takeIf { it.isNotBlank() }

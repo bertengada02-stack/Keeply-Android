@@ -51,7 +51,8 @@ internal fun ItemDetailsScreen(
     onDelete: () -> Unit,
     isChangingLifecycle: Boolean,
     lifecycleError: String?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentLocalDate: String = currentLocalDateIso()
 ) {
     BackHandler(onBack = onBack)
 
@@ -83,7 +84,7 @@ internal fun ItemDetailsScreen(
             ItemDetailsState.Loading -> LoadingDetails()
 
             is ItemDetailsState.Content -> ItemDetailsContent(
-                details = state.thing.toItemDetailsUiModel(),
+                details = state.thing.toItemDetailsUiModel(currentLocalDate = currentLocalDate),
                 status = state.thing.status,
                 onRemindAgain = onRemindAgain,
                 onMarkDone = onMarkDone,
@@ -151,10 +152,14 @@ private fun ItemDetailsContent(
     }
     Text(
         text = details.name,
-        modifier = Modifier.padding(top = 18.dp, bottom = 28.dp),
+        modifier = Modifier.padding(top = 18.dp),
         style = MaterialTheme.typography.headlineMedium,
         color = MaterialTheme.colorScheme.onBackground
     )
+    details.importantDateContext?.let {
+        UrgencyContextRow(it, Modifier.padding(top = 10.dp))
+    }
+    Spacer(Modifier.height(28.dp))
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
         DetailsValue("Status", details.statusText)
         DetailsValue(details.importantDateLabel, details.importantDateText)

@@ -7,6 +7,7 @@ import com.keeply.app.data.ThingRepository
 import com.keeply.app.data.ThingNotFoundException
 import com.keeply.app.model.NewThingDraft
 import com.keeply.app.model.Thing
+import com.keeply.app.model.ThingCategory
 import com.keeply.app.notifications.ReminderSyncCoordinator
 import com.keeply.app.notifications.ReminderSyncResult
 import com.keeply.app.notifications.MissedReminderRecovery
@@ -70,9 +71,46 @@ class KeeplyViewModel internal constructor(
     )
     private val _myThingsFilter = MutableStateFlow(MyThingsFilter.ALL)
     internal val myThingsFilter: StateFlow<MyThingsFilter> = _myThingsFilter.asStateFlow()
+    private val _myThingsCategory = MutableStateFlow<ThingCategory?>(null)
+    internal val myThingsCategory: StateFlow<ThingCategory?> = _myThingsCategory.asStateFlow()
+    private val _myThingsSearchQuery = MutableStateFlow("")
+    internal val myThingsSearchQuery: StateFlow<String> = _myThingsSearchQuery.asStateFlow()
+    private val _myThingsSearchActive = MutableStateFlow(false)
+    internal val myThingsSearchActive: StateFlow<Boolean> = _myThingsSearchActive.asStateFlow()
 
     internal fun selectMyThingsFilter(filter: MyThingsFilter) {
         _myThingsFilter.value = filter
+    }
+
+    internal fun selectMyThingsCategory(category: ThingCategory?) {
+        _myThingsCategory.value = category
+    }
+
+    internal fun openMyThingsSearch() {
+        _myThingsSearchActive.value = true
+    }
+
+    internal fun updateMyThingsSearchQuery(query: String) {
+        _myThingsSearchQuery.value = query
+    }
+
+    internal fun closeAndClearMyThingsSearch() {
+        _myThingsSearchActive.value = false
+        _myThingsSearchQuery.value = ""
+    }
+
+    internal fun showAllMissedThings() {
+        _myThingsFilter.value = MyThingsFilter.MISSED
+        _myThingsCategory.value = null
+        closeAndClearMyThingsSearch()
+    }
+
+    internal fun resetMyThingsAfterCreate() {
+        val reset = myThingsStateAfterSuccessfulCreate()
+        _myThingsFilter.value = reset.filter
+        _myThingsCategory.value = reset.category
+        _myThingsSearchActive.value = reset.searchActive
+        _myThingsSearchQuery.value = reset.searchQuery
     }
 
     private val saveEventsChannel = Channel<SaveThingEvent>(Channel.BUFFERED)
