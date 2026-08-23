@@ -1,5 +1,7 @@
 package com.keeply.app.notifications
 
+import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ComponentName
@@ -31,6 +33,20 @@ class KeeplyNotificationsTest {
     }
 
     @Test
+    fun notificationPermissionIsDeclaredForRuntimePermissionTarget() {
+        val packageInfo = context.packageManager.getPackageInfo(
+            context.packageName,
+            android.content.pm.PackageManager.GET_PERMISSIONS
+        )
+
+        assertTrue(
+            packageInfo.requestedPermissions.orEmpty()
+                .contains(Manifest.permission.POST_NOTIFICATIONS)
+        )
+        assertTrue(context.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.TIRAMISU)
+    }
+
+    @Test
     fun alarmAndDetailsIdentityAreStableAndThingSpecific() {
         assertEquals("keeply://alarm/id-1", alarmDataUri("id-1").toString())
         assertEquals("keeply://thing/id-1", detailsDataUri("id-1").toString())
@@ -50,7 +66,12 @@ class KeeplyNotificationsTest {
         val receiverInfo = context.packageManager.getReceiverInfo(component, 0)
         assertTrue(receiverInfo.exported)
 
-        listOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_USER_UNLOCKED).forEach { action ->
+        listOf(
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_USER_UNLOCKED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        ).forEach { action ->
             val matches = context.packageManager.queryBroadcastReceivers(
                 Intent(action).setPackage(context.packageName),
                 0
