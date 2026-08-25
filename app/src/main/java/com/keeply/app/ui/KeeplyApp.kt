@@ -3,11 +3,8 @@ package com.keeply.app.ui
 import android.Manifest
 import android.app.AlarmManager
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -121,6 +118,7 @@ import kotlinx.coroutines.launch
 private enum class AppDestination {
     HOME,
     MY_THINGS,
+    SETTINGS,
     CATEGORY_SELECTION,
     ADD_THING,
     ITEM_DETAILS,
@@ -141,6 +139,7 @@ fun KeeplyApp(
     var showStartup by remember { mutableStateOf(true) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
     var previousPrimaryDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
+    var settingsBackDestination by rememberSaveable { mutableStateOf(AppDestination.HOME) }
     var selectedCategory by rememberSaveable { mutableStateOf<CategoryGlyph?>(null) }
     var addThingBackDestination by rememberSaveable {
         mutableStateOf(AppDestination.CATEGORY_SELECTION)
@@ -398,12 +397,19 @@ fun KeeplyApp(
         }
         destination = AppDestination.CATEGORY_SELECTION
     }
+    val openSettings = {
+        settingsBackDestination = destination
+        destination = AppDestination.SETTINGS
+    }
 
     BackHandler(enabled = destination == AppDestination.CATEGORY_SELECTION) {
         destination = previousPrimaryDestination
     }
     BackHandler(enabled = destination == AppDestination.MY_THINGS && myThingsSearchActive) {
         viewModel?.closeAndClearMyThingsSearch()
+    }
+    BackHandler(enabled = destination == AppDestination.SETTINGS) {
+        destination = settingsBackDestination
     }
 
     Scaffold(
@@ -425,6 +431,7 @@ fun KeeplyApp(
                 if (homeThings.isEmpty()) {
                     EmptyHomeScreen(
                         onRememberSomething = openCategorySelection,
+                        onSettingsRequested = openSettings,
                         onCategoryShortcut = { category ->
                             saveError = null
                             selectedCategory = category
@@ -436,6 +443,7 @@ fun KeeplyApp(
                 } else {
                     PopulatedHomeScreen(
                         things = homeThings,
+                        onSettingsRequested = openSettings,
                         onCategoryShortcut = { category ->
                             saveError = null
                             selectedCategory = category
@@ -463,10 +471,45 @@ fun KeeplyApp(
                 onSearchRequested = { viewModel?.openMyThingsSearch() },
                 onSearchQueryChanged = { viewModel?.updateMyThingsSearchQuery(it) },
                 onSearchClosed = { viewModel?.closeAndClearMyThingsSearch() },
+                onSettingsRequested = openSettings,
                 onThingSelected = { thingId ->
                     selectedThingId = thingId
                     itemDetailsBackDestination = AppDestination.MY_THINGS
                     destination = AppDestination.ITEM_DETAILS
+                },
+                modifier = Modifier.padding(innerPadding)
+            )
+
+            AppDestination.SETTINGS -> SettingsScreen(
+                versionName = installedVersionName(context),
+                onBack = { destination = settingsBackDestination },
+                onNotificationSettings = {
+                    if (!openNotificationSettings(context)) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Notification settings are unavailable on this device.")
+                        }
+                    }
+                },
+                onExactReminderTiming = {
+                    if (!openExactAlarmSettings(context)) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Exact reminder timing settings are unavailable on this device.")
+                        }
+                    }
+                },
+                onPrivacyPolicy = {
+                    if (!launchExternalIntent(context, privacyPolicyIntent())) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("No browser is available to open the Privacy Policy.")
+                        }
+                    }
+                },
+                onContactSupport = {
+                    if (!launchExternalIntent(context, supportEmailIntent())) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("No email application is available.")
+                        }
+                    }
                 },
                 modifier = Modifier.padding(innerPadding)
             )
@@ -659,6 +702,7 @@ private fun keeplyNavigationColors() = NavigationBarItemDefaults.colors(
 private fun EmptyHomeScreen(
     onRememberSomething: () -> Unit,
     onCategoryShortcut: (CategoryGlyph) -> Unit,
+    onSettingsRequested: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -668,7 +712,7 @@ private fun EmptyHomeScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        KeeplyHeader()
+        KeeplyHeader(onSettingsRequested = onSettingsRequested)
         Spacer(Modifier.height(22.dp))
         HomeHeroImage()
         Spacer(Modifier.height(8.dp))
@@ -707,6 +751,7 @@ internal fun PopulatedHomeScreen(
     things: List<Thing>,
     onCategoryShortcut: (CategoryGlyph) -> Unit,
     onThingSelected: (String) -> Unit,
+    onSettingsRequested: () -> Unit = {},
     modifier: Modifier = Modifier,
     currentLocalDate: String = currentLocalDateIso()
 ) {
@@ -715,7 +760,7 @@ internal fun PopulatedHomeScreen(
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
-        KeeplyHeader()
+        KeeplyHeader(onSettingsRequested = onSettingsRequested)
         Spacer(Modifier.height(20.dp))
         ExampleThings(
             heading = "Remember something",
@@ -836,7 +881,8 @@ private fun KeeplyHeader(
     searchQuery: String = "",
     onSearchRequested: () -> Unit = {},
     onSearchQueryChanged: (String) -> Unit = {},
-    onSearchClosed: () -> Unit = {}
+    onSearchClosed: () -> Unit = {},
+    onSettingsRequested: () -> Unit = {}
 ) {
     val searchFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -885,7 +931,7 @@ private fun KeeplyHeader(
                 Spacer(Modifier.width(20.dp))
             }
         }
-        SettingsIcon()
+        SettingsIcon(onSettingsRequested)
     }
 }
 
@@ -907,9 +953,16 @@ private fun SearchIcon(onClick: () -> Unit) {
 }
 
 @Composable
-private fun SettingsIcon() {
+private fun SettingsIcon(onClick: () -> Unit) {
     val teal = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.size(28.dp).semantics { contentDescription = "Settings, unavailable in Milestone 1" }) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Open Settings" },
+        contentAlignment = Alignment.Center
+    ) {
+    Canvas(Modifier.size(28.dp)) {
         val center = Offset(size.width / 2f, size.height / 2f)
         repeat(8) { index ->
             val angle = Math.toRadians(index * 45.0)
@@ -925,6 +978,7 @@ private fun SettingsIcon() {
         }
         drawCircle(teal, size.width * .28f, center, style = Stroke(3.dp.toPx()))
         drawCircle(teal, size.width * .08f, center)
+    }
     }
 }
 
@@ -1093,6 +1147,7 @@ internal fun MyThingsShell(
     onSearchRequested: () -> Unit = {},
     onSearchQueryChanged: (String) -> Unit = {},
     onSearchClosed: () -> Unit = {},
+    onSettingsRequested: () -> Unit = {},
     currentLocalDate: String = currentLocalDateIso()
 ) {
     val focusManager = LocalFocusManager.current
@@ -1120,6 +1175,7 @@ internal fun MyThingsShell(
             onSearchRequested = onSearchRequested,
             onSearchQueryChanged = onSearchQueryChanged,
             onSearchClosed = onSearchClosed,
+            onSettingsRequested = onSettingsRequested,
             modifier = modifier.then(searchFocusDismissModifier)
         )
     } else {
@@ -1134,6 +1190,7 @@ internal fun MyThingsShell(
             onSearchRequested = onSearchRequested,
             onSearchQueryChanged = onSearchQueryChanged,
             onSearchClosed = onSearchClosed,
+            onSettingsRequested = onSettingsRequested,
             onThingSelected = onThingSelected,
             currentLocalDate = currentLocalDate,
             modifier = modifier.then(searchFocusDismissModifier)
@@ -1152,6 +1209,7 @@ private fun EmptyMyThingsShell(
     onSearchRequested: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
     onSearchClosed: () -> Unit,
+    onSettingsRequested: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1166,7 +1224,8 @@ private fun EmptyMyThingsShell(
             searchQuery = searchQuery,
             onSearchRequested = onSearchRequested,
             onSearchQueryChanged = onSearchQueryChanged,
-            onSearchClosed = onSearchClosed
+            onSearchClosed = onSearchClosed,
+            onSettingsRequested = onSettingsRequested
         )
         Spacer(Modifier.height(20.dp))
         MyThingsFilterControl(selectedFilter, onFilterSelected)
@@ -1203,6 +1262,7 @@ private fun PopulatedMyThingsShell(
     onSearchRequested: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
     onSearchClosed: () -> Unit,
+    onSettingsRequested: () -> Unit,
     onThingSelected: (String) -> Unit,
     currentLocalDate: String,
     modifier: Modifier = Modifier
@@ -1218,7 +1278,8 @@ private fun PopulatedMyThingsShell(
             searchQuery = searchQuery,
             onSearchRequested = onSearchRequested,
             onSearchQueryChanged = onSearchQueryChanged,
-            onSearchClosed = onSearchClosed
+            onSearchClosed = onSearchClosed,
+            onSettingsRequested = onSettingsRequested
         )
         Spacer(Modifier.height(28.dp))
         Text(
@@ -1758,23 +1819,13 @@ private fun markNotificationPermissionRequested(context: Context) {
         .apply()
 }
 
-private fun openNotificationSettings(context: Context) {
-    context.startActivity(
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    )
-}
+private fun openNotificationSettings(context: Context): Boolean =
+    launchExternalIntent(context, notificationSettingsIntent(context.packageName))
 
-private fun openExactAlarmSettings(context: Context) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-    context.startActivity(
-        Intent(
-            Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-            Uri.parse("package:${context.packageName}")
-        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    )
-}
+private fun openExactAlarmSettings(context: Context): Boolean =
+    exactReminderTimingIntent(context.packageName, Build.VERSION.SDK_INT)
+        ?.let { launchExternalIntent(context, it) }
+        ?: false
 
 private fun exactAlarmAccessUnavailable(context: Context): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
