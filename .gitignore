@@ -18,3 +18,9 @@ local.properties
 
 .kotlin/
 app/release/
+
+# Android release signing
+*.jks
+*.keystore
+signing.properties
+keystore.properties
