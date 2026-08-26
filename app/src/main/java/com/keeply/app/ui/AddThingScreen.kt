@@ -8,13 +8,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -26,12 +31,16 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
@@ -245,6 +254,14 @@ private fun ThingFormScreen(
     nowMillis: () -> Long = { System.currentTimeMillis() }
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val nameBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val notesBringIntoViewRequester = remember { BringIntoViewRequester() }
+    var focusedFieldRequester by remember { mutableStateOf<BringIntoViewRequester?>(null) }
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    LaunchedEffect(imeBottom, focusedFieldRequester) {
+        if (imeBottom > 0) focusedFieldRequester?.bringIntoView()
+    }
     var timeZone by rememberSaveable(initialThing?.id) {
         mutableStateOf(initialThing?.reminderTimeZoneId ?: TimeZone.getDefault().id)
     }
@@ -361,6 +378,7 @@ private fun ThingFormScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
@@ -414,7 +432,16 @@ private fun ThingFormScreen(
                 nameError = null
                 revalidateReminder()
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .bringIntoViewRequester(nameBringIntoViewRequester)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        focusedFieldRequester = nameBringIntoViewRequester
+                    } else if (focusedFieldRequester === nameBringIntoViewRequester) {
+                        focusedFieldRequester = null
+                    }
+                },
             label = { Text("Name") },
             supportingText = nameError?.let { error -> ({ Text(error) }) },
             isError = nameError != null,
@@ -512,7 +539,15 @@ private fun ThingFormScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 120.dp),
+                .heightIn(min = 120.dp)
+                .bringIntoViewRequester(notesBringIntoViewRequester)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        focusedFieldRequester = notesBringIntoViewRequester
+                    } else if (focusedFieldRequester === notesBringIntoViewRequester) {
+                        focusedFieldRequester = null
+                    }
+                },
             label = { Text("Notes (optional)") },
             minLines = 3
         )
