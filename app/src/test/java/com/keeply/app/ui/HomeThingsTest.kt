@@ -20,7 +20,7 @@ class HomeThingsTest {
                 ThingStatus.ACTIVE,
                 delivery = ReminderDeliveryState.MISSED_ANNOUNCED
             )
-        ).homeEligibleAndOrdered()
+        ).homeEligibleAndOrdered("2026-08-02")
 
         assertEquals(listOf("missed-active", "active", "progress"), result.map(Thing::id))
     }
@@ -34,7 +34,7 @@ class HomeThingsTest {
             thing("same-old", "2026-08-10", ThingStatus.ACTIVE, createdAt = 2),
             thing("z-same-new", "2026-08-10", ThingStatus.ACTIVE, createdAt = 4),
             thing("a-same-new", "2026-08-10", ThingStatus.ACTIVE, createdAt = 4)
-        ).homeEligibleAndOrdered()
+        ).homeEligibleAndOrdered("2026-08-01")
 
         assertEquals(
             listOf("old-overdue", "a-same-new", "z-same-new", "same-old", "today", "future"),
@@ -51,6 +51,28 @@ class HomeThingsTest {
 
         assertEquals(ImportantDateUrgency.OVERDUE, context?.urgency)
         assertEquals("5 days overdue", context?.timingText)
+    }
+
+    @Test
+    fun unresolvedThingRemainsForOneOverdueDayThenLeavesHomeWithoutMutation() {
+        val active = thing("active", "2026-08-30", ThingStatus.ACTIVE)
+        val inProgress = thing("progress", "2026-08-30", ThingStatus.IN_PROGRESS)
+        val original = listOf(active, inProgress)
+
+        assertEquals(
+            listOf("active", "progress"),
+            original.homeEligibleAndOrdered("2026-08-30").map(Thing::id)
+        )
+        assertEquals(
+            listOf("active", "progress"),
+            original.homeEligibleAndOrdered("2026-08-31").map(Thing::id)
+        )
+        assertEquals(
+            emptyList<String>(),
+            original.homeEligibleAndOrdered("2026-09-01").map(Thing::id)
+        )
+        assertEquals(false, active.isWithinHomeOverdueGracePeriod("2026-09-01"))
+        assertEquals(listOf(active, inProgress), original)
     }
 
     private fun thing(

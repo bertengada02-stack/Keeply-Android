@@ -55,8 +55,8 @@ class MyThingsScreenTest {
             .assertIsDisplayed()
         composeRule.onAllNodesWithText("No active things").assertCountEquals(0)
 
-        composeRule.onNodeWithText("Completed").performClick()
-        composeRule.onNodeWithText("Completed").assert(selected())
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.onNodeWithText("Done").assert(selected())
         composeRule.onNodeWithText("Things you ask Keeply to remember\nwill appear here.")
             .assertIsDisplayed()
         composeRule.onAllNodesWithText("Nothing completed yet").assertCountEquals(0)

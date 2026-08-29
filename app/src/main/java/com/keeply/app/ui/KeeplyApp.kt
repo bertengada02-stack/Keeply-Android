@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -427,7 +429,10 @@ fun KeeplyApp(
     ) { innerPadding ->
         when (destination) {
             AppDestination.HOME -> {
-                val homeThings = remember(things) { things.homeEligibleAndOrdered() }
+                val currentLocalDate = currentLocalDateIso()
+                val homeThings = remember(things, currentLocalDate) {
+                    things.homeEligibleAndOrdered(currentLocalDate)
+                }
                 if (homeThings.isEmpty()) {
                     EmptyHomeScreen(
                         onRememberSomething = openCategorySelection,
@@ -1161,8 +1166,14 @@ internal fun MyThingsShell(
             }
         }
     }
-    val filteredThings = remember(things, selectedFilter, selectedCategory, searchQuery) {
-        things.filterMyThings(selectedFilter, selectedCategory, searchQuery)
+    val filteredThings = remember(
+        things,
+        selectedFilter,
+        selectedCategory,
+        searchQuery,
+        currentLocalDate
+    ) {
+        things.filterMyThings(selectedFilter, selectedCategory, searchQuery, currentLocalDate)
     }
     if (things.isEmpty()) {
         EmptyMyThingsShell(
@@ -1457,45 +1468,68 @@ private fun MyThingsFilterControl(
     selectedFilter: MyThingsFilter,
     onFilterSelected: (MyThingsFilter) -> Unit
 ) {
+    val scrollState = rememberScrollState()
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        MyThingsFilter.entries.forEach { filter ->
-            val selected = filter == selectedFilter
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp)
-                    .background(
-                        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(14.dp)
-                    )
-                    .border(
-                        width = if (selected) 2.dp else 1.dp,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
-                        shape = RoundedCornerShape(14.dp)
-                    )
-                    .selectable(
-                        selected = selected,
-                        role = Role.RadioButton,
-                        onClick = { onFilterSelected(filter) }
-                    )
-                    .semantics {
-                        stateDescription = if (selected) "Selected" else "Not selected"
-                    }
-                    .padding(horizontal = 6.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center
+        Box(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.horizontalScroll(scrollState),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                MyThingsFilter.entries.forEach { filter ->
+                    val selected = filter == selectedFilter
+                    Box(
+                        modifier = Modifier
+                            .widthIn(min = 84.dp)
+                            .heightIn(min = 48.dp)
+                            .background(
+                                color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .border(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .selectable(
+                                selected = selected,
+                                role = Role.RadioButton,
+                                onClick = { onFilterSelected(filter) }
+                            )
+                            .semantics {
+                                stateDescription = if (selected) "Selected" else "Not selected"
+                            }
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = filter.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+        Box(
+            modifier = Modifier.width(20.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            if (scrollState.canScrollForward) {
                 Text(
-                    text = filter.label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (selected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
+                    text = "›",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics {
+                        contentDescription = "More filters to the right"
+                    }
                 )
             }
         }
@@ -1517,6 +1551,8 @@ private fun FilterEmptyState(
         else -> when (filter) {
         MyThingsFilter.ACTIVE -> "No active things" to
             "Things you're still keeping track of will appear here."
+        MyThingsFilter.OVERDUE -> "No overdue things" to
+            "Things past their important date will appear here."
         MyThingsFilter.COMPLETED -> "Nothing completed yet" to
             "Things you mark as done will appear here."
         MyThingsFilter.MISSED -> "No missed reminders" to "You're all caught up."

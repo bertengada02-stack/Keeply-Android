@@ -41,6 +41,99 @@ class MyThingsFilterTest {
     }
 
     @Test
+    fun filterOrderAndLabelsAreAllActiveOverdueMissedDone() {
+        assertEquals(
+            listOf("All", "Active", "Overdue", "Missed", "Done"),
+            MyThingsFilter.entries.map(MyThingsFilter::label)
+        )
+    }
+
+    @Test
+    fun overdueIsCalculatedFromUnresolvedLifecycleAndImportantDateOnly() {
+        val activeOverdue = thing("active-overdue", ThingStatus.ACTIVE, 1).copy(
+            importantDate = "2026-08-29"
+        )
+        val progressOverdue = thing("progress-overdue", ThingStatus.IN_PROGRESS, 1).copy(
+            importantDate = "2026-08-28"
+        )
+        val activeToday = thing("active-today", ThingStatus.ACTIVE, 1).copy(
+            importantDate = "2026-08-30"
+        )
+        val doneOverdue = thing("done-overdue", ThingStatus.DONE, 1).copy(
+            importantDate = "2026-08-01"
+        )
+
+        assertEquals(
+            listOf("progress-overdue", "active-overdue"),
+            listOf(activeToday, doneOverdue, activeOverdue, progressOverdue)
+                .filterMyThings(MyThingsFilter.OVERDUE, null, "", "2026-08-30")
+                .map(Thing::id)
+        )
+    }
+
+    @Test
+    fun overdueComposesWithCategoryAndTitleWithoutChangingMissedMembership() {
+        val target = thing(
+            "target",
+            ThingStatus.ACTIVE,
+            2,
+            ReminderDeliveryState.MISSED_ANNOUNCED
+        ).copy(
+            name = "Passport renewal",
+            category = ThingCategory.DOCUMENT,
+            importantDate = "2026-08-29"
+        )
+        val wrongCategory = target.copy(id = "vehicle", category = ThingCategory.VEHICLE)
+        val notOverdue = target.copy(id = "future", importantDate = "2026-08-31")
+        val source = listOf(target, wrongCategory, notOverdue)
+
+        assertEquals(
+            listOf("target"),
+            source.filterMyThings(
+                MyThingsFilter.OVERDUE,
+                ThingCategory.DOCUMENT,
+                " passport ",
+                "2026-08-30"
+            ).map(Thing::id)
+        )
+        assertEquals(
+            listOf("target", "vehicle", "future"),
+            source.filterMyThings(
+                MyThingsFilter.MISSED,
+                null,
+                "",
+                "2026-08-30"
+            ).map(Thing::id)
+        )
+    }
+
+    @Test
+    fun allUsesHomeGraceCutoffWhileOverdueKeepsOlderUnresolvedThings() {
+        val graceOverdue = thing("grace", ThingStatus.ACTIVE, 3).copy(
+            importantDate = "2026-08-29"
+        )
+        val oldOverdue = thing("old", ThingStatus.IN_PROGRESS, 2).copy(
+            importantDate = "2026-08-28"
+        )
+        val doneOld = thing("done", ThingStatus.DONE, 1).copy(
+            importantDate = "2026-01-01"
+        )
+        val source = listOf(oldOverdue, doneOld, graceOverdue)
+
+        assertEquals(
+            listOf("grace", "done"),
+            source.filterMyThings(MyThingsFilter.ALL, null, "", "2026-08-30")
+                .map(Thing::id)
+        )
+        assertEquals(
+            listOf("old", "grace"),
+            source.filterMyThings(MyThingsFilter.OVERDUE, null, "", "2026-08-30")
+                .map(Thing::id)
+        )
+        assertEquals(false, oldOverdue.isWithinHomeOverdueGracePeriod("2026-08-30"))
+    }
+
+    @Test
     fun missedIncludesActiveAndInProgressMissedThingsWithoutChangingLifecycleFilters() {
         val withMissed = listOf(
             thing("active-missed", ThingStatus.ACTIVE, 3L, ReminderDeliveryState.MISSED_UNANNOUNCED),
@@ -218,7 +311,7 @@ class MyThingsFilterTest {
 
         assertEquals(
             chronological + listOf("done-first", "done-second"),
-            source.filterMyThings(MyThingsFilter.ALL, null, "").map(Thing::id)
+            source.filterMyThings(MyThingsFilter.ALL, null, "", "2026-08-21").map(Thing::id)
         )
         assertEquals(
             chronological.take(5),

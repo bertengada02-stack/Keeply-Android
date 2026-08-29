@@ -7,12 +7,14 @@ import com.keeply.app.model.ThingCategory
 internal enum class MyThingsFilter(val label: String) {
     ALL("All"),
     ACTIVE("Active"),
-    COMPLETED("Completed"),
-    MISSED("Missed");
+    OVERDUE("Overdue"),
+    MISSED("Missed"),
+    COMPLETED("Done");
 
     fun includes(status: ThingStatus): Boolean = when (this) {
         ALL -> true
         ACTIVE -> status == ThingStatus.ACTIVE || status == ThingStatus.IN_PROGRESS
+        OVERDUE -> false
         COMPLETED -> status == ThingStatus.DONE
         MISSED -> false
     }
@@ -38,14 +40,21 @@ internal fun List<Thing>.filteredBy(filter: MyThingsFilter): List<Thing> =
 internal fun List<Thing>.filterMyThings(
     statusFilter: MyThingsFilter,
     category: ThingCategory?,
-    titleQuery: String
+    titleQuery: String,
+    currentLocalDate: String = currentLocalDateIso()
 ): List<Thing> {
     val query = titleQuery.trim()
     val filtered = filter { thing ->
-        val statusMatches = if (statusFilter == MyThingsFilter.MISSED) {
-            thing.reminderDeliveryState.isMissed
-        } else {
-            statusFilter.includes(thing.status)
+        val statusMatches = when (statusFilter) {
+            MyThingsFilter.ALL ->
+                thing.status == ThingStatus.DONE ||
+                    thing.isWithinHomeOverdueGracePeriod(currentLocalDate)
+            MyThingsFilter.MISSED -> thing.reminderDeliveryState.isMissed
+            MyThingsFilter.OVERDUE ->
+                (thing.status == ThingStatus.ACTIVE || thing.status == ThingStatus.IN_PROGRESS) &&
+                    importantDateContext(thing.importantDate, currentLocalDate)
+                        ?.urgency == ImportantDateUrgency.OVERDUE
+            else -> statusFilter.includes(thing.status)
         }
         statusMatches &&
             (category == null || thing.category == category) &&
