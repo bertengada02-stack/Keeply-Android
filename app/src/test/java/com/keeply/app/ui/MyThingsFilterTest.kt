@@ -17,9 +17,9 @@ class MyThingsFilterTest {
     )
 
     @Test
-    fun allContainsEveryLifecycleStateOnceInSourceOrder() {
+    fun allExcludesDoneAndPreservesUnresolvedOrder() {
         assertEquals(
-            listOf("progress", "active", "newest-done", "oldest-done"),
+            listOf("progress", "active"),
             mixed.filteredBy(MyThingsFilter.ALL).map(Thing::id)
         )
     }
@@ -108,7 +108,7 @@ class MyThingsFilterTest {
     }
 
     @Test
-    fun allUsesHomeGraceCutoffWhileOverdueKeepsOlderUnresolvedThings() {
+    fun allKeepsOlderUnresolvedThingsEvenWhenHomeGraceExpires() {
         val graceOverdue = thing("grace", ThingStatus.ACTIVE, 3).copy(
             importantDate = "2026-08-29"
         )
@@ -121,7 +121,7 @@ class MyThingsFilterTest {
         val source = listOf(oldOverdue, doneOld, graceOverdue)
 
         assertEquals(
-            listOf("grace", "done"),
+            listOf("old", "grace"),
             source.filterMyThings(MyThingsFilter.ALL, null, "", "2026-08-30")
                 .map(Thing::id)
         )
@@ -134,7 +134,7 @@ class MyThingsFilterTest {
     }
 
     @Test
-    fun missedIncludesActiveAndInProgressMissedThingsWithoutChangingLifecycleFilters() {
+    fun missedIncludesBothUnresolvedLifecyclesButActiveExcludesMissed() {
         val withMissed = listOf(
             thing("active-missed", ThingStatus.ACTIVE, 3L, ReminderDeliveryState.MISSED_UNANNOUNCED),
             thing("progress-missed", ThingStatus.IN_PROGRESS, 2L, ReminderDeliveryState.MISSED_ANNOUNCED),
@@ -146,7 +146,7 @@ class MyThingsFilterTest {
             withMissed.filteredBy(MyThingsFilter.MISSED).map(Thing::id)
         )
         assertEquals(3, withMissed.filteredBy(MyThingsFilter.ALL).size)
-        assertEquals(3, withMissed.filteredBy(MyThingsFilter.ACTIVE).size)
+        assertEquals(listOf("active-normal"), withMissed.filteredBy(MyThingsFilter.ACTIVE).map(Thing::id))
     }
 
     @Test
@@ -310,11 +310,11 @@ class MyThingsFilterTest {
         )
 
         assertEquals(
-            chronological + listOf("done-first", "done-second"),
+            chronological,
             source.filterMyThings(MyThingsFilter.ALL, null, "", "2026-08-21").map(Thing::id)
         )
         assertEquals(
-            chronological.take(5),
+            emptyList<String>(),
             source.filterMyThings(MyThingsFilter.ACTIVE, ThingCategory.MEDICINE, "renew")
                 .map(Thing::id)
         )
@@ -328,6 +328,165 @@ class MyThingsFilterTest {
             source.filterMyThings(MyThingsFilter.COMPLETED, null, "").map(Thing::id)
         )
     }
+
+    @Test
+    fun doneBelongsOnlyToCompletedRegardlessOfDateOrMissedHistory() {
+        val source = listOf(
+            thing("A", ThingStatus.ACTIVE, 6).copy(importantDate = "2026-08-30"),
+            thing("B", ThingStatus.IN_PROGRESS, 5).copy(importantDate = "2026-08-29"),
+            thing("C", ThingStatus.ACTIVE, 4, ReminderDeliveryState.MISSED_UNANNOUNCED)
+                .copy(importantDate = "2026-08-30"),
+            thing("D", ThingStatus.DONE, 3).copy(importantDate = "2026-09-01"),
+            thing("E", ThingStatus.DONE, 2).copy(importantDate = "2026-01-01"),
+            thing("F", ThingStatus.DONE, 1, ReminderDeliveryState.MISSED_ANNOUNCED)
+                .copy(importantDate = "2026-08-29")
+        )
+        val original = source.toList()
+        val expected = mapOf(
+            MyThingsFilter.ALL to listOf("B", "A", "C"),
+            MyThingsFilter.ACTIVE to listOf("A"),
+            MyThingsFilter.OVERDUE to listOf("B"),
+            MyThingsFilter.MISSED to listOf("C"),
+            MyThingsFilter.COMPLETED to listOf("D", "E", "F")
+        )
+        expected.forEach { (filter, ids) ->
+            assertEquals(ids, source.filterMyThings(filter, null, "", "2026-08-30").map(Thing::id))
+        }
+        assertEquals(original, source)
+    }
+
+    @Test
+    fun doneExclusionAlsoAppliesWithCategoryAndSearch() {
+        val done = thing("done", ThingStatus.DONE, 1, ReminderDeliveryState.MISSED_ANNOUNCED)
+            .copy(name = "Passport renewal", importantDate = "2026-08-29")
+        MyThingsFilter.entries.forEach { filter ->
+            assertEquals(
+                if (filter == MyThingsFilter.COMPLETED) listOf(done) else emptyList<Thing>(),
+                listOf(done).filterMyThings(filter, ThingCategory.DOCUMENT, " PASS ", "2026-08-30")
+            )
+        }
+    }
+
+    @Test
+    fun doneAndReopenTransitionsImmediatelyRecomputeMembershipWithoutChangingData() {
+        val cases = listOf(
+            thing("active", ThingStatus.ACTIVE, 3).copy(importantDate = "2026-08-30"),
+            thing("overdue", ThingStatus.IN_PROGRESS, 2).copy(importantDate = "2026-08-29"),
+            thing("missed", ThingStatus.ACTIVE, 1, ReminderDeliveryState.MISSED_ANNOUNCED)
+                .copy(importantDate = "2026-08-29")
+        )
+        cases.forEach { original ->
+            val done = original.copy(status = ThingStatus.DONE)
+            val reopened = done.copy(status = ThingStatus.ACTIVE)
+            MyThingsFilter.entries.forEach { filter ->
+                assertEquals(
+                    if (filter == MyThingsFilter.COMPLETED) listOf(done) else emptyList<Thing>(),
+                    listOf(done).filterMyThings(filter, null, "", "2026-08-30")
+                )
+                val originallyIncluded = listOf(original)
+                    .filterMyThings(filter, null, "", "2026-08-30").isNotEmpty()
+                assertEquals(
+                    originallyIncluded,
+                    listOf(reopened).filterMyThings(filter, null, "", "2026-08-30").isNotEmpty()
+                )
+            }
+            assertEquals(original, done.copy(status = original.status))
+        }
+    }
+
+    @Test
+    fun globalTitleSearchFindsEveryStatusIncludingOldOverdueAndMissed() {
+        val source = globalSearchThings()
+        source.forEach { target ->
+            assertEquals(
+                listOf(target),
+                source.filterMyThings(MyThingsFilter.ALL, null, " ${target.name.uppercase()} ", "2026-08-30")
+            )
+        }
+        assertEquals(
+            listOf("old-overdue", "old-missed", "active", "done"),
+            source.filterMyThings(MyThingsFilter.ALL, null, "passport", "2026-08-30").map(Thing::id)
+        )
+    }
+
+    @Test
+    fun emptyWhitespaceAndClearedGlobalSearchRestoreNormalAllMembership() {
+        val source = globalSearchThings()
+        assertEquals(
+            listOf("done"),
+            source.filterMyThings(MyThingsFilter.ALL, null, "finished", "2026-08-30").map(Thing::id)
+        )
+        listOf("", "   ", "\t\n").forEach { query ->
+            assertEquals(
+                listOf("old-overdue", "old-missed", "active"),
+                source.filterMyThings(MyThingsFilter.ALL, null, query, "2026-08-30").map(Thing::id)
+            )
+        }
+    }
+
+    @Test
+    fun explicitStatusSearchRetainsMembershipAndMatchingRules() {
+        val source = globalSearchThings()
+        val expected = mapOf(
+            MyThingsFilter.ACTIVE to listOf("active"),
+            MyThingsFilter.OVERDUE to listOf("old-overdue", "old-missed"),
+            MyThingsFilter.MISSED to listOf("old-missed"),
+            MyThingsFilter.COMPLETED to listOf("done")
+        )
+        expected.forEach { (filter, ids) ->
+            assertEquals(
+                ids,
+                source.filterMyThings(filter, null, "passport", "2026-08-30").map(Thing::id)
+            )
+            assertTrue(source.filterMyThings(filter, null, "no match", "2026-08-30").isEmpty())
+        }
+    }
+
+    @Test
+    fun explicitCategoryPreventsGlobalSearchAndPreservesCategoryAndDoneExclusion() {
+        val source = globalSearchThings()
+        assertEquals(
+            listOf("old-overdue", "old-missed", "active"),
+            source.filterMyThings(MyThingsFilter.ALL, ThingCategory.DOCUMENT, "passport", "2026-08-30")
+                .map(Thing::id)
+        )
+        assertTrue(
+            source.filterMyThings(MyThingsFilter.ALL, ThingCategory.VEHICLE, "passport", "2026-08-30")
+                .isEmpty()
+        )
+    }
+
+    @Test
+    fun activeExcludesOverdueAndMissedWhileOverdueAndMissedCanOverlap() {
+        val today = thing("today", ThingStatus.IN_PROGRESS, 5).copy(importantDate = "2026-08-30")
+        val future = thing("future", ThingStatus.ACTIVE, 4).copy(importantDate = "2026-08-31")
+        val overdue = thing("overdue", ThingStatus.ACTIVE, 3).copy(importantDate = "2026-08-29")
+        val overdueMissed = thing("overdue-missed", ThingStatus.IN_PROGRESS, 2, ReminderDeliveryState.MISSED_ANNOUNCED)
+            .copy(importantDate = "2026-08-28")
+        val futureMissed = thing("future-missed", ThingStatus.ACTIVE, 1, ReminderDeliveryState.MISSED_UNANNOUNCED)
+            .copy(importantDate = "2026-09-01")
+        val source = listOf(today, future, overdue, overdueMissed, futureMissed)
+        val expected = mapOf(
+            MyThingsFilter.ALL to listOf("overdue-missed", "overdue", "today", "future", "future-missed"),
+            MyThingsFilter.ACTIVE to listOf("today", "future"),
+            MyThingsFilter.OVERDUE to listOf("overdue-missed", "overdue"),
+            MyThingsFilter.MISSED to listOf("overdue-missed", "future-missed"),
+            MyThingsFilter.COMPLETED to emptyList<String>()
+        )
+        expected.forEach { (filter, ids) ->
+            assertEquals(ids, source.filterMyThings(filter, null, "", "2026-08-30").map(Thing::id))
+        }
+    }
+
+    private fun globalSearchThings() = listOf(
+        thing("active", ThingStatus.ACTIVE, 4).copy(name = "Current Passport", importantDate = "2026-08-30"),
+        thing("old-overdue", ThingStatus.IN_PROGRESS, 3)
+            .copy(name = "Expired Passport", importantDate = "2026-01-01"),
+        thing("old-missed", ThingStatus.ACTIVE, 2, ReminderDeliveryState.MISSED_UNANNOUNCED)
+            .copy(name = "Missed Passport", importantDate = "2026-02-01"),
+        thing("done", ThingStatus.DONE, 1, ReminderDeliveryState.MISSED_ANNOUNCED)
+            .copy(name = "Finished Passport", importantDate = "2026-01-01")
+    )
 
     private fun thing(
         id: String,

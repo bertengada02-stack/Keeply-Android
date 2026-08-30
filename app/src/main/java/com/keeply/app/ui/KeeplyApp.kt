@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -1468,68 +1467,47 @@ private fun MyThingsFilterControl(
     selectedFilter: MyThingsFilter,
     onFilterSelected: (MyThingsFilter) -> Unit
 ) {
-    val scrollState = rememberScrollState()
     Row(
         modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.horizontalScroll(scrollState),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        MyThingsFilter.entries.forEach { filter ->
+            val selected = filter == selectedFilter
+            Box(
+                modifier = Modifier
+                    .widthIn(min = 52.dp)
+                    .heightIn(min = 48.dp)
+                    .background(
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .selectable(
+                        selected = selected,
+                        role = Role.RadioButton,
+                        onClick = { onFilterSelected(filter) }
+                    )
+                    .semantics {
+                        stateDescription = if (selected) "Selected" else "Not selected"
+                    }
+                    .padding(horizontal = 7.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
             ) {
-                MyThingsFilter.entries.forEach { filter ->
-                    val selected = filter == selectedFilter
-                    Box(
-                        modifier = Modifier
-                            .widthIn(min = 84.dp)
-                            .heightIn(min = 48.dp)
-                            .background(
-                                color = if (selected) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surface,
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .border(
-                                width = if (selected) 2.dp else 1.dp,
-                                color = if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f),
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .selectable(
-                                selected = selected,
-                                role = Role.RadioButton,
-                                onClick = { onFilterSelected(filter) }
-                            )
-                            .semantics {
-                                stateDescription = if (selected) "Selected" else "Not selected"
-                            }
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = filter.label,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-        }
-        Box(
-            modifier = Modifier.width(20.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            if (scrollState.canScrollForward) {
                 Text(
-                    text = "›",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.semantics {
-                        contentDescription = "More filters to the right"
-                    }
+                    text = filter.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontSize = 15.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
                 )
             }
         }

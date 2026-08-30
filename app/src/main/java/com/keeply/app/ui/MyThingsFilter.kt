@@ -44,11 +44,18 @@ internal fun List<Thing>.filterMyThings(
     currentLocalDate: String = currentLocalDateIso()
 ): List<Thing> {
     val query = titleQuery.trim()
+    val isGlobalSearch = query.isNotEmpty() && statusFilter == MyThingsFilter.ALL && category == null
     val filtered = filter { thing ->
-        val statusMatches = when (statusFilter) {
-            MyThingsFilter.ALL ->
-                thing.status == ThingStatus.DONE ||
-                    thing.isWithinHomeOverdueGracePeriod(currentLocalDate)
+        if (!isGlobalSearch && thing.status == ThingStatus.DONE && statusFilter != MyThingsFilter.COMPLETED) {
+            return@filter false
+        }
+        val statusMatches = isGlobalSearch || when (statusFilter) {
+            MyThingsFilter.ALL -> thing.status != ThingStatus.DONE
+            MyThingsFilter.ACTIVE ->
+                statusFilter.includes(thing.status) &&
+                    !thing.reminderDeliveryState.isMissed &&
+                    importantDateContext(thing.importantDate, currentLocalDate)
+                        ?.urgency != ImportantDateUrgency.OVERDUE
             MyThingsFilter.MISSED -> thing.reminderDeliveryState.isMissed
             MyThingsFilter.OVERDUE ->
                 (thing.status == ThingStatus.ACTIVE || thing.status == ThingStatus.IN_PROGRESS) &&
