@@ -35,8 +35,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keeply.app.model.ThingStatus
-import com.keeply.app.model.RemindAgainPreset
-import com.keeply.app.model.calculateNextReminder
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -86,6 +84,11 @@ internal fun ItemDetailsScreen(
             is ItemDetailsState.Content -> ItemDetailsContent(
                 details = state.thing.toItemDetailsUiModel(currentLocalDate = currentLocalDate),
                 status = state.thing.status,
+                importantDateMillis = isoImportantDateToMillis(
+                    state.thing.importantDate,
+                    TimeZone.getDefault().id
+                ),
+                onEdit = onEdit,
                 onRemindAgain = onRemindAgain,
                 onMarkDone = onMarkDone,
                 onReopen = onReopen,
@@ -127,6 +130,8 @@ private fun LoadingDetails() {
 private fun ItemDetailsContent(
     details: ItemDetailsUiModel,
     status: ThingStatus,
+    importantDateMillis: Long?,
+    onEdit: () -> Unit,
     onRemindAgain: (Long, String) -> Unit,
     onMarkDone: () -> Unit,
     onReopen: () -> Unit,
@@ -198,7 +203,12 @@ private fun ItemDetailsContent(
 
     if (showReminderChoices) {
         RemindAgainDialog(
+            importantDateMillis = importantDateMillis,
             onDismiss = { showReminderChoices = false },
+            onEdit = {
+                showReminderChoices = false
+                onEdit()
+            },
             onSelected = { millis, zone ->
                 showReminderChoices = false
                 onRemindAgain(millis, zone)
@@ -226,11 +236,19 @@ private fun ItemDetailsContent(
 }
 
 @Composable
-private fun RemindAgainDialog(onDismiss: () -> Unit, onSelected: (Long, String) -> Unit) {
+private fun RemindAgainDialog(
+    importantDateMillis: Long?,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onSelected: (Long, String) -> Unit
+) {
     val context = LocalContext.current
     val timeZone = remember { TimeZone.getDefault() }
-    fun selectPreset(preset: RemindAgainPreset) {
-        onSelected(calculateNextReminder(preset, System.currentTimeMillis(), timeZone), timeZone.id)
+    val nowMillis = System.currentTimeMillis()
+    val availableChoices = availableReminderChoices(importantDateMillis, nowMillis, timeZone)
+    fun selectPreset(choice: ReminderChoice) {
+        val selectedImportantDate = importantDateMillis ?: return
+        onSelected(presetReminderMillis(selectedImportantDate, choice, timeZone), timeZone.id)
     }
     fun selectCustom() {
         val initial = Calendar.getInstance(timeZone).apply { add(Calendar.DAY_OF_MONTH, 1) }
@@ -240,32 +258,63 @@ private fun RemindAgainDialog(onDismiss: () -> Unit, onSelected: (Long, String) 
                     set(year, month, day, hour, minute, 0)
                     set(Calendar.MILLISECOND, 0)
                 }
-                onSelected(selected.timeInMillis, timeZone.id)
+                if (importantDateMillis != null && validateReminderWindow(
+                        reminderMillis = selected.timeInMillis,
+                        nowMillis = System.currentTimeMillis(),
+                        importantDateMillis = importantDateMillis,
+                        timeZone = timeZone
+                    ) == null
+                ) {
+                    onSelected(selected.timeInMillis, timeZone.id)
+                }
             }, initial.get(Calendar.HOUR_OF_DAY), initial.get(Calendar.MINUTE), false).show()
         }, initial.get(Calendar.YEAR), initial.get(Calendar.MONTH), initial.get(Calendar.DAY_OF_MONTH))
         dateDialog.datePicker.minDate = Calendar.getInstance(timeZone).apply {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }.timeInMillis
+        importantDateMillis?.let {
+            dateDialog.datePicker.maxDate = importantDateCutoffMillis(it, timeZone)
+        }
         dateDialog.show()
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Remind me again") },
-        text = {
-            Column {
-                listOf(
-                    "Tomorrow" to RemindAgainPreset.TOMORROW,
-                    "3 days" to RemindAgainPreset.THREE_DAYS,
-                    "1 week" to RemindAgainPreset.ONE_WEEK
-                ).forEach { (label, preset) ->
-                    TextButton(onClick = { selectPreset(preset) }, modifier = Modifier.fillMaxWidth()) { Text(label) }
+    if (availableChoices.isEmpty()) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Update the Important Date first") },
+            text = {
+                Text(
+                    "This Thing’s Important Date has already passed. " +
+                        "Set a new future Important Date before scheduling another reminder."
+                )
+            },
+            confirmButton = { TextButton(onClick = onEdit) { Text("Edit Thing") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Remind me again") },
+            text = {
+                Column {
+                    ReminderChoice.entries.filter { it in availableChoices }.forEach { choice ->
+                        TextButton(
+                            onClick = {
+                                if (choice == ReminderChoice.CUSTOM) {
+                                    onDismiss()
+                                    selectCustom()
+                                } else {
+                                    selectPreset(choice)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(choice.label) }
+                    }
                 }
-                TextButton(onClick = { onDismiss(); selectCustom() }, modifier = Modifier.fillMaxWidth()) { Text("Custom") }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } }
-    )
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+        )
+    }
 }
 
 @Composable

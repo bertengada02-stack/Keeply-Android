@@ -128,6 +128,26 @@ internal fun isPresetReminderAvailable(
     timeZone = timeZone
 ) == null
 
+internal fun availableReminderChoices(
+    importantDateMillis: Long?,
+    nowMillis: Long,
+    timeZone: TimeZone
+): Set<ReminderChoice> {
+    if (importantDateMillis == null) return emptySet()
+    return ReminderChoice.entries.filterTo(linkedSetOf()) { choice ->
+        when (choice) {
+            ReminderChoice.CUSTOM ->
+                importantDateCutoffMillis(importantDateMillis, timeZone) > nowMillis
+            else -> isPresetReminderAvailable(
+                importantDateMillis = importantDateMillis,
+                choice = choice,
+                nowMillis = nowMillis,
+                timeZone = timeZone
+            )
+        }
+    }
+}
+
 internal fun resolveReminderMillis(
     importantDateMillis: Long?,
     choice: ReminderChoice?,
@@ -669,6 +689,11 @@ private fun ReminderChoiceDialog(
     onSelected: (ReminderChoice) -> Unit,
     onNoReminder: () -> Unit
 ) {
+    val availableChoices = availableReminderChoices(
+        importantDateMillis = importantDateMillis,
+        nowMillis = nowMillis,
+        timeZone = timeZone
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Remind me") },
@@ -680,20 +705,10 @@ private fun ReminderChoiceDialog(
                     onClick = onNoReminder
                 )
                 ReminderChoice.entries.forEach { choice ->
-                    val enabled = when (choice) {
-                        ReminderChoice.CUSTOM -> importantDateMillis != null &&
-                            importantDateCutoffMillis(importantDateMillis, timeZone) > nowMillis
-                        else -> importantDateMillis != null && isPresetReminderAvailable(
-                            importantDateMillis = importantDateMillis,
-                            choice = choice,
-                            nowMillis = nowMillis,
-                            timeZone = timeZone
-                        )
-                    }
                     ReminderDialogRow(
                         label = choice.label,
                         selected = selected == choice,
-                        enabled = enabled
+                        enabled = choice in availableChoices
                     ) { onSelected(choice) }
                 }
             }

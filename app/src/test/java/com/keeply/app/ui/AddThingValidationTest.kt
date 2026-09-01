@@ -261,6 +261,89 @@ class AddThingValidationTest {
         )
     }
 
+    @Test
+    fun newThingOffersValidChoicesForFutureImportantDate() {
+        assertEquals(
+            setOf(
+                ReminderChoice.ON_DAY,
+                ReminderChoice.ONE_DAY_BEFORE,
+                ReminderChoice.THREE_DAYS_BEFORE,
+                ReminderChoice.CUSTOM
+            ),
+            choicesForAugustTwentyFifth()
+        )
+    }
+
+    @Test
+    fun activeEditOffersSameChoicesAsNewThing() {
+        val createChoices = choicesForAugustTwentyFifth()
+        val activeEditChoices = availableReminderChoices(
+            importantDateMillis = localMillis(2026, Calendar.AUGUST, 25, 0, 0),
+            nowMillis = localMillis(2026, Calendar.AUGUST, 20, 10, 0),
+            timeZone = timeZone
+        )
+
+        assertEquals(createChoices, activeEditChoices)
+    }
+
+    @Test
+    fun reopenedDoneEditOffersSameChoicesAsNewThing() {
+        val createChoices = choicesForAugustTwentyFifth()
+        val reopenedEditChoices = choicesForAugustTwentyFifth()
+
+        assertEquals(createChoices, reopenedEditChoices)
+        assertEquals(true, ReminderChoice.ON_DAY in reopenedEditChoices)
+        assertEquals(true, ReminderChoice.ONE_DAY_BEFORE in reopenedEditChoices)
+    }
+
+    @Test
+    fun oneDayBeforeIsUnavailableAfterItsReminderTime() {
+        val choices = availableReminderChoices(
+            importantDateMillis = localMillis(2026, Calendar.AUGUST, 25, 0, 0),
+            nowMillis = localMillis(2026, Calendar.AUGUST, 24, 9, 0),
+            timeZone = timeZone
+        )
+
+        assertEquals(false, ReminderChoice.ONE_DAY_BEFORE in choices)
+    }
+
+    @Test
+    fun onTheDayIsUnavailableAfterItsReminderTime() {
+        val choices = availableReminderChoices(
+            importantDateMillis = localMillis(2026, Calendar.AUGUST, 25, 0, 0),
+            nowMillis = localMillis(2026, Calendar.AUGUST, 25, 9, 0),
+            timeZone = timeZone
+        )
+
+        assertEquals(false, ReminderChoice.ON_DAY in choices)
+    }
+
+    @Test
+    fun changingImportantDateRecalculatesAvailableChoices() {
+        val now = localMillis(2026, Calendar.AUGUST, 24, 10, 0)
+        val originalChoices = availableReminderChoices(
+            localMillis(2026, Calendar.AUGUST, 25, 0, 0),
+            now,
+            timeZone
+        )
+        val changedChoices = availableReminderChoices(
+            localMillis(2026, Calendar.AUGUST, 27, 0, 0),
+            now,
+            timeZone
+        )
+
+        assertEquals(false, ReminderChoice.ONE_DAY_BEFORE in originalChoices)
+        assertEquals(true, ReminderChoice.ONE_DAY_BEFORE in changedChoices)
+        assertEquals(true, ReminderChoice.ON_DAY in changedChoices)
+    }
+
+    private fun choicesForAugustTwentyFifth(): Set<ReminderChoice> =
+        availableReminderChoices(
+            importantDateMillis = localMillis(2026, Calendar.AUGUST, 25, 0, 0),
+            nowMillis = localMillis(2026, Calendar.AUGUST, 20, 10, 0),
+            timeZone = timeZone
+        )
+
     private fun assertPresetOffset(choice: ReminderChoice, expectedDay: Int) {
         val importantDate = localMillis(2026, Calendar.AUGUST, 20, 23, 30)
         assertEquals(

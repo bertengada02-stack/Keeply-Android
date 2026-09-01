@@ -8,6 +8,7 @@ import com.keeply.app.notifications.ReminderSyncCoordinator
 import com.keeply.app.notifications.MissedReminderRecovery
 import com.keeply.app.notifications.createReminderChannel
 import com.keeply.app.notifications.reminderLog
+import com.google.android.gms.ads.MobileAds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,6 +29,9 @@ class KeeplyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createReminderChannel(this)
+        applicationScope.launch {
+            MobileAds.initialize(this@KeeplyApplication) {}
+        }
         reconcileReminders()
     }
 

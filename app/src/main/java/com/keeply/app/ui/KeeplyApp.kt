@@ -18,6 +18,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -80,6 +81,9 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -100,6 +104,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.keeply.app.R
+import com.keeply.app.ads.KeeplyAdBanner
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
 import com.keeply.app.model.ThingStatus
@@ -436,6 +441,7 @@ fun KeeplyApp(
                     EmptyHomeScreen(
                         onRememberSomething = openCategorySelection,
                         onSettingsRequested = openSettings,
+                        adBanner = { KeeplyAdBanner() },
                         onCategoryShortcut = { category ->
                             saveError = null
                             selectedCategory = category
@@ -448,6 +454,7 @@ fun KeeplyApp(
                     PopulatedHomeScreen(
                         things = homeThings,
                         onSettingsRequested = openSettings,
+                        adBanner = { KeeplyAdBanner() },
                         onCategoryShortcut = { category ->
                             saveError = null
                             selectedCategory = category
@@ -476,6 +483,7 @@ fun KeeplyApp(
                 onSearchQueryChanged = { viewModel?.updateMyThingsSearchQuery(it) },
                 onSearchClosed = { viewModel?.closeAndClearMyThingsSearch() },
                 onSettingsRequested = openSettings,
+                adBanner = { KeeplyAdBanner() },
                 onThingSelected = { thingId ->
                     selectedThingId = thingId
                     itemDetailsBackDestination = AppDestination.MY_THINGS
@@ -707,6 +715,7 @@ private fun EmptyHomeScreen(
     onRememberSomething: () -> Unit,
     onCategoryShortcut: (CategoryGlyph) -> Unit,
     onSettingsRequested: () -> Unit,
+    adBanner: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -720,6 +729,7 @@ private fun EmptyHomeScreen(
         Spacer(Modifier.height(22.dp))
         HomeHeroImage()
         Spacer(Modifier.height(8.dp))
+        adBanner()
         Text(
             text = "Nothing to remember yet",
             style = MaterialTheme.typography.headlineMedium,
@@ -757,7 +767,8 @@ internal fun PopulatedHomeScreen(
     onThingSelected: (String) -> Unit,
     onSettingsRequested: () -> Unit = {},
     modifier: Modifier = Modifier,
-    currentLocalDate: String = currentLocalDateIso()
+    currentLocalDate: String = currentLocalDateIso(),
+    adBanner: @Composable () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -765,23 +776,70 @@ internal fun PopulatedHomeScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
         KeeplyHeader(onSettingsRequested = onSettingsRequested)
-        Spacer(Modifier.height(20.dp))
-        ExampleThings(
-            heading = "Remember something",
-            onCategoryShortcut = onCategoryShortcut
-        )
-        Spacer(Modifier.height(20.dp))
-        HomeSectionHeading("Coming up")
-        Spacer(Modifier.height(14.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(items = things, key = Thing::id) { thing ->
-                HomeThingCard(
-                    thing = thing,
-                    dateContext = importantDateContext(thing.importantDate, currentLocalDate),
-                    onClick = { onThingSelected(thing.id) }
-                )
+        val homePageScrollState = rememberScrollState()
+        val comingUpNestedScroll = remember(homePageScrollState) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y >= 0f) return Offset.Zero
+                    val consumed = homePageScrollState.dispatchRawDelta(-available.y)
+                    return Offset(x = 0f, y = -consumed)
+                }
+
+                override fun onPostScroll(
+                    consumed: Offset,
+                    available: Offset,
+                    source: NestedScrollSource
+                ): Offset {
+                    if (available.y <= 0f) return Offset.Zero
+                    val consumedByParent = homePageScrollState.dispatchRawDelta(-available.y)
+                    return Offset(x = 0f, y = -consumedByParent)
+                }
             }
-            item { Spacer(Modifier.height(8.dp)) }
+        }
+        BoxWithConstraints(modifier = Modifier.weight(1f)) {
+            val comingUpHeight = maxHeight
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(homePageScrollState)
+                    .nestedScroll(comingUpNestedScroll)
+            ) {
+                Spacer(Modifier.height(20.dp))
+                ExampleThings(
+                    heading = "Remember something",
+                    onCategoryShortcut = onCategoryShortcut
+                )
+                Spacer(Modifier.height(20.dp))
+                Column(modifier = Modifier.height(comingUpHeight)) {
+                    HomeSectionHeading("Coming up")
+                    Spacer(Modifier.height(14.dp))
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val thingsBeforeAd = things.take(4)
+                        val thingsAfterAd = things.drop(4)
+                        items(items = thingsBeforeAd, key = Thing::id) { thing ->
+                            HomeThingCard(
+                                thing = thing,
+                                dateContext = importantDateContext(thing.importantDate, currentLocalDate),
+                                onClick = { onThingSelected(thing.id) }
+                            )
+                        }
+                        if (things.isNotEmpty()) {
+                            item(key = "home-ad-banner") { adBanner() }
+                        }
+                        items(items = thingsAfterAd, key = Thing::id) { thing ->
+                            HomeThingCard(
+                                thing = thing,
+                                dateContext = importantDateContext(thing.importantDate, currentLocalDate),
+                                onClick = { onThingSelected(thing.id) }
+                            )
+                        }
+                        item { Spacer(Modifier.height(8.dp)) }
+                    }
+                }
+            }
         }
     }
 }
@@ -1152,7 +1210,8 @@ internal fun MyThingsShell(
     onSearchQueryChanged: (String) -> Unit = {},
     onSearchClosed: () -> Unit = {},
     onSettingsRequested: () -> Unit = {},
-    currentLocalDate: String = currentLocalDateIso()
+    currentLocalDate: String = currentLocalDateIso(),
+    adBanner: @Composable () -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -1186,6 +1245,7 @@ internal fun MyThingsShell(
             onSearchQueryChanged = onSearchQueryChanged,
             onSearchClosed = onSearchClosed,
             onSettingsRequested = onSettingsRequested,
+            adBanner = adBanner,
             modifier = modifier.then(searchFocusDismissModifier)
         )
     } else {
@@ -1201,6 +1261,7 @@ internal fun MyThingsShell(
             onSearchQueryChanged = onSearchQueryChanged,
             onSearchClosed = onSearchClosed,
             onSettingsRequested = onSettingsRequested,
+            adBanner = adBanner,
             onThingSelected = onThingSelected,
             currentLocalDate = currentLocalDate,
             modifier = modifier.then(searchFocusDismissModifier)
@@ -1220,6 +1281,7 @@ private fun EmptyMyThingsShell(
     onSearchQueryChanged: (String) -> Unit,
     onSearchClosed: () -> Unit,
     onSettingsRequested: () -> Unit,
+    adBanner: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1241,22 +1303,32 @@ private fun EmptyMyThingsShell(
         MyThingsFilterControl(selectedFilter, onFilterSelected)
         Spacer(Modifier.height(10.dp))
         MyThingsCategoryFilter(selectedCategory, onCategorySelected)
-        Spacer(Modifier.weight(0.8f))
-        ClipboardIllustration()
-        Spacer(Modifier.height(26.dp))
-        Text(
-            text = "My Things",
-            style = MaterialTheme.typography.headlineMedium,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(14.dp))
-        Text(
-            text = "Things you ask Keeply to remember\nwill appear here.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.weight(1.2f))
+        Spacer(Modifier.height(10.dp))
+        adBanner()
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ClipboardIllustration()
+                    Spacer(Modifier.height(26.dp))
+                    Text(
+                        text = "My Things",
+                        style = MaterialTheme.typography.headlineMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = "Things you ask Keeply to remember\nwill appear here.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1273,6 +1345,7 @@ private fun PopulatedMyThingsShell(
     onSearchQueryChanged: (String) -> Unit,
     onSearchClosed: () -> Unit,
     onSettingsRequested: () -> Unit,
+    adBanner: @Composable () -> Unit,
     onThingSelected: (String) -> Unit,
     currentLocalDate: String,
     modifier: Modifier = Modifier
@@ -1302,6 +1375,8 @@ private fun PopulatedMyThingsShell(
         Spacer(Modifier.height(10.dp))
         MyThingsCategoryFilter(selectedCategory, onCategorySelected)
         Spacer(Modifier.height(14.dp))
+        adBanner()
+        Spacer(Modifier.height(14.dp))
         if (things.isEmpty()) {
             FilterEmptyState(
                 filter = selectedFilter,
@@ -1310,7 +1385,10 @@ private fun PopulatedMyThingsShell(
                 modifier = Modifier.weight(1f)
             )
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 items(items = things, key = Thing::id) { thing ->
                     ThingSummaryRow(
                         thing = thing,
