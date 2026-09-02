@@ -19,6 +19,6 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.keeply.app", appContext.packageName)
+        assertEquals("com.oobertappnetwork.keeply", appContext.packageName)
     }
 }

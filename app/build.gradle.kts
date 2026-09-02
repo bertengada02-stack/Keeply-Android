@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.keeply.app"
+        applicationId = "com.oobertappnetwork.keeply"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
