@@ -28,6 +28,31 @@ class SettingsScreenTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun privacyChoicesAppearOnlyWhenRequiredAndInvokeAction() {
+        val required = androidx.compose.runtime.mutableStateOf(false)
+        var clicks = 0
+        composeRule.setContent {
+            KeeplyTheme {
+                SettingsScreen(
+                    versionName = "1.0", onBack = {}, onNotificationSettings = {},
+                    onExactReminderTiming = {}, onPrivacyPolicy = {}, onContactSupport = {},
+                    privacyChoicesRequired = required.value,
+                    onPrivacyChoices = { clicks++ }
+                )
+            }
+        }
+        composeRule.onAllNodesWithText("Privacy choices").assertCountEquals(0)
+        composeRule.runOnIdle { required.value = true }
+        composeRule.onNodeWithText("Privacy choices").assertHasClickAction().performClick()
+        composeRule.onNodeWithText("Privacy Policy").assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(1, clicks)
+            required.value = false
+        }
+        composeRule.onAllNodesWithText("Privacy choices").assertCountEquals(0)
+    }
+
+    @Test
     fun settingsContentAndActionsAreAccessible() {
         val clicked = mutableListOf<String>()
         composeRule.setContent {

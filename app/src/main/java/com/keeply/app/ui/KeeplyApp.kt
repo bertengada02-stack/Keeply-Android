@@ -1,6 +1,9 @@
 package com.keeply.app.ui
 
 import android.Manifest
+import android.app.Activity
+import android.content.ContextWrapper
+import com.keeply.app.KeeplyApplication
 import android.app.AlarmManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -140,6 +143,8 @@ fun KeeplyApp(
     onRequestedMissedThingsConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val consentManager = (context.applicationContext as? KeeplyApplication)?.consentManager
+    val privacyChoicesRequired = consentManager?.privacyRequired?.collectAsStateWithLifecycle()?.value ?: false
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     var showStartup by remember { mutableStateOf(true) }
@@ -493,6 +498,17 @@ fun KeeplyApp(
             )
 
             AppDestination.SETTINGS -> SettingsScreen(
+                privacyChoicesRequired = privacyChoicesRequired,
+                onPrivacyChoices = {
+                    var host: Context = context
+                    while (host is ContextWrapper && host !is Activity) host = host.baseContext
+                    val activity = host as? Activity
+                    if (activity != null) consentManager?.showPrivacyOptions(activity) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Privacy choices are unavailable. Please try again.")
+                        }
+                    }
+                },
                 versionName = installedVersionName(context),
                 onBack = { destination = settingsBackDestination },
                 onNotificationSettings = {

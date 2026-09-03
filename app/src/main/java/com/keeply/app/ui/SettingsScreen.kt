@@ -45,7 +45,9 @@ internal fun SettingsScreen(
     onExactReminderTiming: () -> Unit,
     onPrivacyPolicy: () -> Unit,
     onContactSupport: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    privacyChoicesRequired: Boolean = false,
+    onPrivacyChoices: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -69,6 +71,7 @@ internal fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
         SettingsSection("PRIVACY & SUPPORT")
         SettingsRow("Privacy Policy", onPrivacyPolicy)
+        if (privacyChoicesRequired) SettingsRow("Privacy choices", onPrivacyChoices)
         SettingsRow("Contact Oobert App Network", onContactSupport)
         Spacer(Modifier.height(24.dp))
         SettingsSection("ABOUT")

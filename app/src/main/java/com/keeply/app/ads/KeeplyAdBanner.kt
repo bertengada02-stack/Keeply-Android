@@ -21,6 +21,8 @@ import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.LoadAdError
+import com.keeply.app.KeeplyApplication
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 // Google's official Android banner test ad unit. Never replace with an invented/live ID.
 private const val GOOGLE_TEST_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/6300978111"
@@ -29,6 +31,9 @@ private enum class BannerLoadState { LOADING, LOADED, FAILED }
 
 @Composable
 fun KeeplyAdBanner(modifier: Modifier = Modifier) {
+    val app = LocalContext.current.applicationContext as? KeeplyApplication ?: return
+    val adsReady by app.consentManager.adsReady.collectAsStateWithLifecycle()
+    if (!adsReady) return
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val context = LocalContext.current
         val widthDp = maxWidth.value.toInt().coerceAtLeast(1)
@@ -57,7 +62,9 @@ fun KeeplyAdBanner(modifier: Modifier = Modifier) {
                 onDispose { adView.destroy() }
             }
             LaunchedEffect(adView) {
-                adView.loadAd(AdRequest.Builder().build())
+                if (app.consentManager.adsReady.value) {
+                    adView.loadAd(AdRequest.Builder().build())
+                }
             }
             Box(
                 modifier = Modifier

@@ -8,7 +8,7 @@ import com.keeply.app.notifications.ReminderSyncCoordinator
 import com.keeply.app.notifications.MissedReminderRecovery
 import com.keeply.app.notifications.createReminderChannel
 import com.keeply.app.notifications.reminderLog
-import com.google.android.gms.ads.MobileAds
+import com.keeply.app.ads.KeeplyConsentManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class KeeplyApplication : Application() {
+    val consentManager: KeeplyConsentManager by lazy { KeeplyConsentManager(this) }
     val database: KeeplyDatabase by lazy { KeeplyDatabase.create(this) }
     val thingRepository: ThingRepository by lazy { ThingRepository(database.thingDao()) }
     internal val reminderSyncCoordinator: ReminderSyncCoordinator by lazy {
@@ -29,9 +30,6 @@ class KeeplyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createReminderChannel(this)
-        applicationScope.launch {
-            MobileAds.initialize(this@KeeplyApplication) {}
-        }
         reconcileReminders()
     }
 

@@ -21,10 +21,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Keeply">
-        <!-- Google's official sample AdMob app ID. Replace only when production ads are approved. -->
+        <!-- Keeply AdMob app ID; banner ad units remain Google's official test IDs. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-6815772620942145~1502828476" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

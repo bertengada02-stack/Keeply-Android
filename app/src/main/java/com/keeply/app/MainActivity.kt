@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        (application as KeeplyApplication).consentManager.refresh(this)
     }
 
     override fun onNewIntent(intent: Intent) {
