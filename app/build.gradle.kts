@@ -25,7 +25,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            resValue("string", "admob_banner_ad_unit_id", "ca-app-pub-3940256099942544/6300978111")
+        }
         release {
+            resValue("string", "admob_banner_ad_unit_id", "ca-app-pub-6815772620942145/1102840397")
             optimization {
                 enable = false
             }
@@ -37,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        resValues = true
     }
 }
 

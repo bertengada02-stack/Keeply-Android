@@ -21,7 +21,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Keeply">
-        <!-- Keeply AdMob app ID; banner ad units remain Google's official test IDs. -->
+        <!-- Keeply AdMob app ID; banner ad unit IDs are build-specific (debug test, release production). -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-6815772620942145~1502828476" />
