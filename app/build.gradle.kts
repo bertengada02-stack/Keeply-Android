@@ -94,6 +94,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation("androidx.fragment:fragment:1.9.0")
     implementation(libs.androidx.room.runtime)
     implementation(libs.google.mobile.ads)
     implementation(libs.google.ump)
