@@ -1,14 +1,16 @@
 package com.keeply.app
 
 import android.app.Application
+import com.keeply.app.ads.KeeplyConsentManager
 import com.keeply.app.data.ThingRepository
 import com.keeply.app.data.local.KeeplyDatabase
 import com.keeply.app.notifications.AndroidReminderScheduler
-import com.keeply.app.notifications.ReminderSyncCoordinator
 import com.keeply.app.notifications.MissedReminderRecovery
+import com.keeply.app.notifications.ReminderSyncCoordinator
 import com.keeply.app.notifications.createReminderChannel
+import com.keeply.app.notifications.createWeeklyEngagementChannel
 import com.keeply.app.notifications.reminderLog
-import com.keeply.app.ads.KeeplyConsentManager
+import com.keeply.app.notifications.scheduleWeeklyEngagementNotification
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +32,8 @@ class KeeplyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createReminderChannel(this)
+        createWeeklyEngagementChannel(this)
+        scheduleWeeklyEngagementNotification(this)
         reconcileReminders()
     }
 
