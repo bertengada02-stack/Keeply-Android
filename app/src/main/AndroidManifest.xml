@@ -41,6 +41,9 @@
             android:name=".notifications.ReminderAlarmReceiver"
             android:exported="false" />
         <receiver
+            android:name=".notifications.WeeklyEngagementReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".notifications.ReminderRescheduleReceiver"
             android:enabled="true"
             android:exported="false">
