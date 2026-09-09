@@ -18,6 +18,7 @@ class ReminderRescheduleReceiver : BroadcastReceiver() {
             return
         }
         reminderLog("reschedule broadcast received action=$action")
+        scheduleWeeklyEngagementNotification(context)
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
