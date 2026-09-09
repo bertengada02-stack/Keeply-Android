@@ -8,6 +8,10 @@
     <string name="missed_reminder_body">Open Keeply to review the thing that needs your attention.</string>
     <string name="missed_reminders_title">You have missed Keeply reminders</string>
     <string name="missed_reminders_body">Open Keeply to review the things that need your attention.</string>
+    <string name="weekly_engagement_channel_name">Keeply weekly reminders</string>
+    <string name="weekly_engagement_channel_description">A quiet weekly reminder to add something you want Keeply to remember</string>
+    <string name="weekly_engagement_notification_title">Want to remember something?</string>
+    <string name="weekly_engagement_notification_body">Add a thing in Keeply and we\'ll remind you when it matters.</string>
     <string name="xiaomi_autostart_guidance_title">Keep reminders working after restart</string>
     <string name="xiaomi_autostart_guidance_body">On Xiaomi, Redmi, and POCO phones, enable Autostart for Keeply so your reminders can be restored after your phone restarts.</string>
     <string name="xiaomi_autostart_guidance_open_settings">Open Autostart settings</string>
