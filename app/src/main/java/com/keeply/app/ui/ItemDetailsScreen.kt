@@ -43,6 +43,7 @@ internal fun ItemDetailsScreen(
     state: ItemDetailsState,
     onBack: () -> Unit,
     onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
     onRemindAgain: (Long, String) -> Unit,
     onMarkDone: () -> Unit,
     onReopen: () -> Unit,
@@ -89,6 +90,7 @@ internal fun ItemDetailsScreen(
                     TimeZone.getDefault().id
                 ),
                 onEdit = onEdit,
+                onDuplicate = onDuplicate,
                 onRemindAgain = onRemindAgain,
                 onMarkDone = onMarkDone,
                 onReopen = onReopen,
@@ -132,6 +134,7 @@ private fun ItemDetailsContent(
     status: ThingStatus,
     importantDateMillis: Long?,
     onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
     onRemindAgain: (Long, String) -> Unit,
     onMarkDone: () -> Unit,
     onReopen: () -> Unit,
@@ -194,7 +197,12 @@ private fun ItemDetailsContent(
     lifecycleError?.let {
         Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
     }
-    HorizontalDivider(modifier = Modifier.padding(top = 20.dp))
+    TextButton(
+        onClick = onDuplicate,
+        enabled = !isChangingLifecycle,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) { Text("Duplicate") }
+    HorizontalDivider(modifier = Modifier.padding(top = 12.dp))
     TextButton(
         onClick = { showDeleteConfirmation = true },
         enabled = !isChangingLifecycle,
