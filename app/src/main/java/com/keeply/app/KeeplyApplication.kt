@@ -8,6 +8,7 @@ import com.keeply.app.data.local.KeeplyDatabase
 import com.keeply.app.notifications.AndroidReminderScheduler
 import com.keeply.app.notifications.MissedReminderRecovery
 import com.keeply.app.notifications.ReminderSyncCoordinator
+import com.keeply.app.notifications.cancelWeeklyEngagementNotification
 import com.keeply.app.notifications.createReminderChannel
 import com.keeply.app.notifications.createWeeklyEngagementChannel
 import com.keeply.app.notifications.reminderLog
@@ -15,6 +16,7 @@ import com.keeply.app.notifications.scheduleWeeklyEngagementNotification
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -36,8 +38,22 @@ class KeeplyApplication : Application() {
         proManager
         createReminderChannel(this)
         createWeeklyEngagementChannel(this)
-        scheduleWeeklyEngagementNotification(this)
+        observeProEntitlement()
         reconcileReminders()
+    }
+
+    private fun observeProEntitlement() {
+        applicationScope.launch {
+            proManager.isPro
+                .distinctUntilChanged()
+                .collect { isPro ->
+                    if (isPro) {
+                        scheduleWeeklyEngagementNotification(this@KeeplyApplication)
+                    } else {
+                        cancelWeeklyEngagementNotification(this@KeeplyApplication)
+                    }
+                }
+        }
     }
 
     fun reconcileReminders() {
