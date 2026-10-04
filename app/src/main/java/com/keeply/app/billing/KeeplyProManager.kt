@@ -1,9 +1,11 @@
 package com.keeply.app.billing
 
+import android.app.Activity
 import android.content.Context
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
+import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
@@ -23,6 +25,8 @@ class KeeplyProManager(context: Context) {
 
     private val _proPrice = MutableStateFlow<String?>(null)
     val proPrice: StateFlow<String?> = _proPrice.asStateFlow()
+
+    private var proProductDetails: ProductDetails? = null
 
     private val billingClient = BillingClient.newBuilder(appContext)
         .setListener { _, purchases ->
@@ -98,11 +102,37 @@ class KeeplyProManager(context: Context) {
             val details = result.productDetailsList.firstOrNull {
                 it.productId == KEEPLY_PRO_PRODUCT_ID
             }
+            proProductDetails = details
             _proPrice.value = details
                 ?.oneTimePurchaseOfferDetailsList
                 ?.firstOrNull()
                 ?.formattedPrice
         }
+    }
+
+    fun launchPurchase(activity: Activity): BillingResult? {
+        if (!billingClient.isReady) {
+            connect()
+            return null
+        }
+
+        val details = proProductDetails ?: run {
+            refreshProductDetails()
+            return null
+        }
+        val offerToken = details.oneTimePurchaseOfferDetailsList
+            ?.firstOrNull()
+            ?.offerToken
+            ?: return null
+        val productDetailsParams = BillingFlowParams.ProductDetailsParams.newBuilder()
+            .setProductDetails(details)
+            .setOfferToken(offerToken)
+            .build()
+        val flowParams = BillingFlowParams.newBuilder()
+            .setProductDetailsParamsList(listOf(productDetailsParams))
+            .build()
+
+        return billingClient.launchBillingFlow(activity, flowParams)
     }
 
     private fun updateEntitlement(purchases: List<com.android.billingclient.api.Purchase>) {
