@@ -215,6 +215,33 @@ internal fun EditThingScreen(
 }
 
 @Composable
+internal fun DuplicateThingScreen(
+    thing: Thing,
+    onBack: () -> Unit,
+    onCreateDuplicate: (NewThingDraft) -> Unit,
+    isSaving: Boolean,
+    saveError: String?,
+    modifier: Modifier = Modifier,
+    nowMillis: () -> Long = { System.currentTimeMillis() }
+) {
+    ThingFormScreen(
+        initialThing = thing,
+        initialCategory = thing.category.toCategoryGlyph(),
+        heading = "Duplicate thing",
+        primaryAction = "Create duplicate",
+        categoryEditable = true,
+        requireChanges = false,
+        onBack = onBack,
+        onSubmit = { draft, _ -> onCreateDuplicate(draft) },
+        onUnchangedSave = {},
+        isSubmitting = isSaving,
+        submitError = saveError,
+        modifier = modifier,
+        nowMillis = nowMillis
+    )
+}
+
+@Composable
 internal fun EditThingUnavailableScreen(
     state: ItemDetailsState,
     onBackToMyThings: () -> Unit,
@@ -265,6 +292,7 @@ private fun ThingFormScreen(
     heading: String,
     primaryAction: String,
     categoryEditable: Boolean,
+    requireChanges: Boolean = true,
     onBack: () -> Unit,
     onSubmit: (NewThingDraft, Boolean) -> Unit,
     onUnchangedSave: () -> Unit,
@@ -582,7 +610,7 @@ private fun ThingFormScreen(
         }
         Button(
             onClick = {
-                if (initialThing != null && !isDirty) {
+                if (initialThing != null && requireChanges && !isDirty) {
                     onUnchangedSave()
                     return@Button
                 }
