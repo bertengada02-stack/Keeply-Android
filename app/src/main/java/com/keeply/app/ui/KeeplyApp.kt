@@ -737,42 +737,48 @@ private fun EmptyHomeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         KeeplyHeader(onSettingsRequested = onSettingsRequested)
-        Spacer(Modifier.height(22.dp))
-        HomeHeroImage()
-        Spacer(Modifier.height(8.dp))
         adBanner()
-        Text(
-            text = "Nothing to remember yet",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "Add the things you don't want to forget,\nand Keeply will remind you when they matter.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(14.dp))
-        ExampleThings(onCategoryShortcut = onCategoryShortcut)
-        Spacer(Modifier.height(12.dp))
-        ReassurancePanel()
-        Spacer(Modifier.height(10.dp))
-        Button(
-            onClick = onRememberSomething,
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("+  Remember something")
+            Spacer(Modifier.height(22.dp))
+            HomeHeroImage()
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Nothing to remember yet",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Add the things you don't want to forget,\nand Keeply will remind you when they matter.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(14.dp))
+            ExampleThings(onCategoryShortcut = onCategoryShortcut)
+            Spacer(Modifier.height(12.dp))
+            ReassurancePanel()
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onRememberSomething,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text("+  Remember something")
+            }
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -792,6 +798,7 @@ internal fun PopulatedHomeScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp)
     ) {
         KeeplyHeader(onSettingsRequested = onSettingsRequested)
+        adBanner()
         val homePageScrollState = rememberScrollState()
         val comingUpNestedScroll = remember(homePageScrollState) {
             object : NestedScrollConnection {
@@ -833,19 +840,7 @@ internal fun PopulatedHomeScreen(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        val thingsBeforeAd = things.take(4)
-                        val thingsAfterAd = things.drop(4)
-                        items(items = thingsBeforeAd, key = Thing::id) { thing ->
-                            HomeThingCard(
-                                thing = thing,
-                                dateContext = importantDateContext(thing.importantDate, currentLocalDate),
-                                onClick = { onThingSelected(thing.id) }
-                            )
-                        }
-                        if (things.isNotEmpty()) {
-                            item(key = "home-ad-banner") { adBanner() }
-                        }
-                        items(items = thingsAfterAd, key = Thing::id) { thing ->
+                        items(items = things, key = Thing::id) { thing ->
                             HomeThingCard(
                                 thing = thing,
                                 dateContext = importantDateContext(thing.importantDate, currentLocalDate),
