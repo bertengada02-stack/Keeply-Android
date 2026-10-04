@@ -17,6 +17,7 @@ internal const val REMINDER_CHANNEL_ID = "keeply_reminders"
 internal const val ACTION_OPEN_THING = "com.keeply.app.action.OPEN_THING"
 internal const val ACTION_OPEN_MISSED_THINGS = "com.keeply.app.action.OPEN_MISSED_THINGS"
 internal const val ACTION_SNOOZE_REMINDER = "com.keeply.app.action.SNOOZE_REMINDER"
+internal const val ACTION_MARK_DONE = "com.keeply.app.action.MARK_DONE"
 internal const val REMINDER_NOTIFICATION_ID = 1
 internal const val MISSED_REMINDER_NOTIFICATION_ID = 2
 internal const val MISSED_REMINDER_NOTIFICATION_TAG = "keeply_missed_reminders"
@@ -64,6 +65,17 @@ internal fun postThingReminder(context: Context, thing: Thing): NotificationPost
         snoozeIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
+    val markDoneIntent = Intent(context, ReminderAlarmReceiver::class.java).apply {
+        action = ACTION_MARK_DONE
+        data = Uri.parse("keeply://done/${thing.id}")
+        putExtra(EXTRA_THING_ID, thing.id)
+    }
+    val markDonePendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        markDoneIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
     val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification_keeply)
         .setContentTitle(context.getString(R.string.reminder_notification_title))
@@ -75,6 +87,11 @@ internal fun postThingReminder(context: Context, thing: Thing): NotificationPost
             R.drawable.ic_notification_keeply,
             "Snooze 1 hour",
             snoozePendingIntent
+        )
+        .addAction(
+            R.drawable.ic_notification_keeply,
+            "Mark done",
+            markDonePendingIntent
         )
         .build()
     return try {
