@@ -27,8 +27,9 @@ sealed interface KeeplyProPurchaseState {
 
 class KeeplyProManager(context: Context) {
     private val appContext = context.applicationContext
+    private val entitlementPrefs = appContext.getSharedPreferences("keeply_pro_entitlement", Context.MODE_PRIVATE)
 
-    private val _isPro = MutableStateFlow(false)
+    private val _isPro = MutableStateFlow(entitlementPrefs.getBoolean("is_pro", false))
     val isPro: StateFlow<Boolean> = _isPro.asStateFlow()
 
     private val _proPrice = MutableStateFlow<String?>(null)
@@ -180,7 +181,9 @@ class KeeplyProManager(context: Context) {
                 KEEPLY_PRO_PRODUCT_ID in purchase.products
         }
 
-        _isPro.value = ownedPurchase != null
+        val isPro = ownedPurchase != null
+        _isPro.value = isPro
+        entitlementPrefs.edit().putBoolean("is_pro", isPro).apply()
 
         ownedPurchase
             ?.takeIf { !it.isAcknowledged }
