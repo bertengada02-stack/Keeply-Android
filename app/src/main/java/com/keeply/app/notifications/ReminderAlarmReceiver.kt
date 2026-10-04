@@ -3,6 +3,7 @@ package com.keeply.app.notifications
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.core.app.NotificationManagerCompat
 import com.keeply.app.KeeplyApplication
 import com.keeply.app.model.ActionableReminder
 import com.keeply.app.model.Thing
@@ -11,9 +12,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.TimeZone
+
+private const val SNOOZE_DURATION_MILLIS = 60L * 60L * 1000L
 
 class ReminderAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_SNOOZE_REMINDER) {
+            handleSnooze(context, intent)
+            return
+        }
         if (intent.action != ACTION_DELIVER_REMINDER) return
         val thingId = intent.getStringExtra(EXTRA_THING_ID) ?: return
         val expectedEpoch = intent.getLongExtra(EXTRA_EXPECTED_EPOCH, -1L)
@@ -41,6 +49,34 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             } catch (error: Exception) {
                 // Fail closed: a transient database/notification error must not post stale data.
                 reminderLogError("receiver failed thingId=$thingId", error)
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    private fun handleSnooze(context: Context, intent: Intent) {
+        val thingId = intent.getStringExtra(EXTRA_THING_ID) ?: return
+        val pendingResult = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                val app = context.applicationContext as KeeplyApplication
+                val thing = app.thingRepository.findById(thingId)
+                if (thing == null) {
+                    reminderLog("snooze rejected missing Thing thingId=$thingId")
+                    return@launch
+                }
+                val snoozeAt = System.currentTimeMillis() + SNOOZE_DURATION_MILLIS
+                val updated = app.thingRepository.remindAgain(
+                    thingId,
+                    snoozeAt,
+                    TimeZone.getDefault().id
+                )
+                val syncResult = app.reminderSyncCoordinator.sync(updated)
+                NotificationManagerCompat.from(context).cancel(thingId, REMINDER_NOTIFICATION_ID)
+                reminderLog("snoozed thingId=$thingId epoch=$snoozeAt sync=$syncResult")
+            } catch (error: Exception) {
+                reminderLogError("snooze failed thingId=$thingId", error)
             } finally {
                 pendingResult.finish()
             }
