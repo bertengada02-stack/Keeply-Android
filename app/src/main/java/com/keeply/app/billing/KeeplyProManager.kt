@@ -1,11 +1,9 @@
 package com.keeply.app.billing
 
-import android.app.Activity
 import android.content.Context
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
-import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
@@ -22,6 +20,9 @@ class KeeplyProManager(context: Context) {
 
     private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> = _isPro.asStateFlow()
+
+    private val _proPrice = MutableStateFlow<String?>(null)
+    val proPrice: StateFlow<String?> = _proPrice.asStateFlow()
 
     private val billingClient = BillingClient.newBuilder(appContext)
         .setListener { _, purchases ->
@@ -58,6 +59,7 @@ class KeeplyProManager(context: Context) {
     private fun connect() {
         if (billingClient.isReady) {
             refreshEntitlement()
+            refreshProductDetails()
             return
         }
 
@@ -65,11 +67,42 @@ class KeeplyProManager(context: Context) {
             override fun onBillingSetupFinished(billingResult: BillingResult) {
                 if (billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
                     refreshEntitlement()
+                    refreshProductDetails()
                 }
             }
 
             override fun onBillingServiceDisconnected() = Unit
         })
+    }
+
+    fun refreshProductDetails() {
+        if (!billingClient.isReady) {
+            connect()
+            return
+        }
+
+        val product = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(KEEPLY_PRO_PRODUCT_ID)
+            .setProductType(BillingClient.ProductType.INAPP)
+            .build()
+        val params = QueryProductDetailsParams.newBuilder()
+            .setProductList(listOf(product))
+            .build()
+
+        billingClient.queryProductDetailsAsync(params) { billingResult, result ->
+            if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                _proPrice.value = null
+                return@queryProductDetailsAsync
+            }
+
+            val details = result.productDetailsList.firstOrNull {
+                it.productId == KEEPLY_PRO_PRODUCT_ID
+            }
+            _proPrice.value = details
+                ?.oneTimePurchaseOfferDetailsList
+                ?.firstOrNull()
+                ?.formattedPrice
+        }
     }
 
     private fun updateEntitlement(purchases: List<com.android.billingclient.api.Purchase>) {
