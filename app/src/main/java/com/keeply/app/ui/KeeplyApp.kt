@@ -131,7 +131,8 @@ private enum class AppDestination {
     CATEGORY_SELECTION,
     ADD_THING,
     ITEM_DETAILS,
-    EDIT_THING
+    EDIT_THING,
+    DUPLICATE_THING
 }
 
 @Composable
@@ -576,6 +577,10 @@ fun KeeplyApp(
                     updateError = null
                     destination = AppDestination.EDIT_THING
                 },
+                onDuplicate = {
+                    saveError = null
+                    destination = AppDestination.DUPLICATE_THING
+                },
                 onRemindAgain = { millis, zone ->
                     lifecycleError = null
                     selectedThingId?.let { viewModel?.remindAgain(it, millis, zone) }
@@ -596,6 +601,29 @@ fun KeeplyApp(
                 lifecycleError = lifecycleError,
                 modifier = Modifier.padding(innerPadding)
             )
+
+            AppDestination.DUPLICATE_THING -> when (val details = itemDetailsState) {
+                is ItemDetailsState.Content -> DuplicateThingScreen(
+                    thing = details.thing,
+                    onBack = { destination = AppDestination.ITEM_DETAILS },
+                    onCreateDuplicate = { draft ->
+                        saveError = null
+                        viewModel?.createThing(draft)
+                    },
+                    isSaving = isSaving,
+                    saveError = saveError,
+                    modifier = Modifier.padding(innerPadding)
+                )
+                else -> EditThingUnavailableScreen(
+                    state = details,
+                    onBackToMyThings = {
+                        destination = itemDetailsBackDestination
+                        selectedThingId = null
+                        viewModel?.clearSelectedThing()
+                    },
+                    modifier = Modifier.padding(innerPadding)
+                )
+            }
 
             AppDestination.EDIT_THING -> when (val details = itemDetailsState) {
                 is ItemDetailsState.Content -> EditThingScreen(
