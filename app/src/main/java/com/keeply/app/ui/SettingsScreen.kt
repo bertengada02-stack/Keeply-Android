@@ -45,6 +45,8 @@ internal fun SettingsScreen(
     onExactReminderTiming: () -> Unit,
     onPrivacyPolicy: () -> Unit,
     onContactSupport: () -> Unit,
+    isPro: Boolean = false,
+    proPrice: String? = null,
     modifier: Modifier = Modifier,
     privacyChoicesRequired: Boolean = false,
     onPrivacyChoices: () -> Unit = {}
@@ -65,6 +67,25 @@ internal fun SettingsScreen(
             )
         }
         Spacer(Modifier.height(28.dp))
+        SettingsSection("KEEPLY PRO")
+        Text(
+            text = if (isPro) "Keeply Pro active" else "One-time purchase. No subscription.",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = if (isPro) {
+                "Ads are removed and all Pro features are unlocked."
+            } else {
+                "Remove ads, unlock all Pro features, and get future Pro feature updates." +
+                    (proPrice?.let { " $it one time." } ?: "")
+            },
+            modifier = Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(24.dp))
         SettingsSection("REMINDERS")
         SettingsRow("Notification settings", onNotificationSettings)
         SettingsRow("Exact reminder timing", onExactReminderTiming)
