@@ -145,8 +145,10 @@ fun KeeplyApp(
     onRequestedMissedThingsConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val consentManager = (context.applicationContext as? KeeplyApplication)?.consentManager
+    val app = context.applicationContext as? KeeplyApplication
+    val consentManager = app?.consentManager
     val privacyChoicesRequired = consentManager?.privacyRequired?.collectAsStateWithLifecycle()?.value ?: false
+    val isPro = app?.proManager?.isPro?.collectAsStateWithLifecycle()?.value ?: false
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     var showStartup by remember { mutableStateOf(true) }
@@ -581,8 +583,10 @@ fun KeeplyApp(
                     destination = AppDestination.EDIT_THING
                 },
                 onDuplicate = {
-                    saveError = null
-                    destination = AppDestination.DUPLICATE_THING
+                    if (isPro) {
+                        saveError = null
+                        destination = AppDestination.DUPLICATE_THING
+                    }
                 },
                 onRemindAgain = { millis, zone ->
                     lifecycleError = null
@@ -605,7 +609,9 @@ fun KeeplyApp(
                 modifier = Modifier.padding(innerPadding)
             )
 
-            AppDestination.DUPLICATE_THING -> when (val details = itemDetailsState) {
+            AppDestination.DUPLICATE_THING -> if (!isPro) {
+                destination = AppDestination.ITEM_DETAILS
+            } else when (val details = itemDetailsState) {
                 is ItemDetailsState.Content -> DuplicateThingScreen(
                     thing = details.thing,
                     onBack = { destination = AppDestination.ITEM_DETAILS },
