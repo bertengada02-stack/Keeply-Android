@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ internal fun SettingsScreen(
     onExactReminderTiming: () -> Unit,
     onPrivacyPolicy: () -> Unit,
     onContactSupport: () -> Unit,
+    onBuyPro: () -> Unit = {},
     isPro: Boolean = false,
     proPrice: String? = null,
     modifier: Modifier = Modifier,
@@ -85,6 +87,17 @@ internal fun SettingsScreen(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (!isPro) {
+            Button(
+                onClick = onBuyPro,
+                enabled = proPrice != null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(proPrice?.let { "Get Keeply Pro — $it" } ?: "Keeply Pro unavailable")
+            }
+        }
         Spacer(Modifier.height(24.dp))
         SettingsSection("REMINDERS")
         SettingsRow("Notification settings", onNotificationSettings)
