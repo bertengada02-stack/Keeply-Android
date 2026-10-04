@@ -16,7 +16,6 @@ import com.keeply.app.notifications.scheduleWeeklyEngagementNotification
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -44,9 +43,7 @@ class KeeplyApplication : Application() {
 
     private fun observeProEntitlement() {
         applicationScope.launch {
-            proManager.isPro
-                .distinctUntilChanged()
-                .collect { isPro ->
+            proManager.isPro.collect { isPro ->
                     if (isPro) {
                         scheduleWeeklyEngagementNotification(this@KeeplyApplication)
                     } else {
