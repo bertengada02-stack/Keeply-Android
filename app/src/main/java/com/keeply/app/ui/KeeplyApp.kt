@@ -520,6 +520,17 @@ fun KeeplyApp(
                 },
                 versionName = installedVersionName(context),
                 onBack = { destination = settingsBackDestination },
+                onBuyPro = {
+                    var host: Context = context
+                    while (host is ContextWrapper && host !is Activity) host = host.baseContext
+                    val activity = host as? Activity
+                    val result = activity?.let { app?.proManager?.launchPurchase(it) }
+                    if (result == null || result.responseCode != com.android.billingclient.api.BillingClient.BillingResponseCode.OK) {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Keeply Pro purchase is unavailable. Please try again.")
+                        }
+                    }
+                },
                 onNotificationSettings = {
                     if (!openNotificationSettings(context)) {
                         coroutineScope.launch {
