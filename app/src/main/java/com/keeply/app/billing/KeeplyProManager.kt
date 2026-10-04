@@ -17,6 +17,14 @@ import kotlinx.coroutines.flow.asStateFlow
 
 internal const val KEEPLY_PRO_PRODUCT_ID = "keeply_pro"
 
+sealed interface KeeplyProPurchaseState {
+    data object Idle : KeeplyProPurchaseState
+    data object Purchased : KeeplyProPurchaseState
+    data object Pending : KeeplyProPurchaseState
+    data object Cancelled : KeeplyProPurchaseState
+    data class Error(val message: String) : KeeplyProPurchaseState
+}
+
 class KeeplyProManager(context: Context) {
     private val appContext = context.applicationContext
 
@@ -26,11 +34,38 @@ class KeeplyProManager(context: Context) {
     private val _proPrice = MutableStateFlow<String?>(null)
     val proPrice: StateFlow<String?> = _proPrice.asStateFlow()
 
+    private val _purchaseState = MutableStateFlow<KeeplyProPurchaseState>(KeeplyProPurchaseState.Idle)
+    val purchaseState: StateFlow<KeeplyProPurchaseState> = _purchaseState.asStateFlow()
+
     private var proProductDetails: ProductDetails? = null
 
     private val billingClient = BillingClient.newBuilder(appContext)
-        .setListener { _, purchases ->
-            if (purchases != null) updateEntitlement(purchases)
+        .setListener { billingResult, purchases ->
+            when (billingResult.responseCode) {
+                BillingClient.BillingResponseCode.OK -> {
+                    val proPurchases = purchases.orEmpty().filter {
+                        KEEPLY_PRO_PRODUCT_ID in it.products
+                    }
+                    updateEntitlement(proPurchases)
+                    _purchaseState.value = when {
+                        proPurchases.any {
+                            it.purchaseState == com.android.billingclient.api.Purchase.PurchaseState.PURCHASED
+                        } -> KeeplyProPurchaseState.Purchased
+                        proPurchases.any {
+                            it.purchaseState == com.android.billingclient.api.Purchase.PurchaseState.PENDING
+                        } -> KeeplyProPurchaseState.Pending
+                        else -> KeeplyProPurchaseState.Idle
+                    }
+                }
+                BillingClient.BillingResponseCode.USER_CANCELED -> {
+                    _purchaseState.value = KeeplyProPurchaseState.Cancelled
+                }
+                else -> {
+                    _purchaseState.value = KeeplyProPurchaseState.Error(
+                        billingResult.debugMessage.ifBlank { "Google Play purchase failed." }
+                    )
+                }
+            }
         }
         .enablePendingPurchases(
             PendingPurchasesParams.newBuilder()
@@ -41,6 +76,10 @@ class KeeplyProManager(context: Context) {
 
     init {
         connect()
+    }
+
+    fun clearPurchaseState() {
+        _purchaseState.value = KeeplyProPurchaseState.Idle
     }
 
     fun refreshEntitlement() {
