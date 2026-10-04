@@ -149,6 +149,7 @@ fun KeeplyApp(
     val consentManager = app?.consentManager
     val privacyChoicesRequired = consentManager?.privacyRequired?.collectAsStateWithLifecycle()?.value ?: false
     val isPro = app?.proManager?.isPro?.collectAsStateWithLifecycle()?.value ?: false
+    val proPrice = app?.proManager?.proPrice?.collectAsStateWithLifecycle()?.value
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     var showStartup by remember { mutableStateOf(true) }
@@ -504,6 +505,8 @@ fun KeeplyApp(
             )
 
             AppDestination.SETTINGS -> SettingsScreen(
+                isPro = isPro,
+                proPrice = proPrice,
                 privacyChoicesRequired = privacyChoicesRequired,
                 onPrivacyChoices = {
                     var host: Context = context
