@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.keeply.app.KeeplyApplication
 import com.keeply.app.MainActivity
 import com.keeply.app.R
 import com.keeply.app.model.Thing
@@ -54,46 +55,52 @@ internal fun postThingReminder(context: Context, thing: Thing): NotificationPost
         contentIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-    val snoozeIntent = Intent(context, ReminderAlarmReceiver::class.java).apply {
-        action = ACTION_SNOOZE_REMINDER
-        data = Uri.parse("keeply://snooze/${thing.id}")
-        putExtra(EXTRA_THING_ID, thing.id)
-    }
-    val snoozePendingIntent = PendingIntent.getBroadcast(
-        context,
-        0,
-        snoozeIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-    val markDoneIntent = Intent(context, ReminderAlarmReceiver::class.java).apply {
-        action = ACTION_MARK_DONE
-        data = Uri.parse("keeply://done/${thing.id}")
-        putExtra(EXTRA_THING_ID, thing.id)
-    }
-    val markDonePendingIntent = PendingIntent.getBroadcast(
-        context,
-        0,
-        markDoneIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-    val notification = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
+    val notificationBuilder = NotificationCompat.Builder(context, REMINDER_CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification_keeply)
         .setContentTitle(context.getString(R.string.reminder_notification_title))
         .setContentText(context.getString(R.string.reminder_notification_body, thing.name))
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setAutoCancel(true)
         .setContentIntent(pendingIntent)
-        .addAction(
-            R.drawable.ic_notification_keeply,
-            "Snooze 1 hour",
-            snoozePendingIntent
+
+    val isPro = (context.applicationContext as? KeeplyApplication)?.proManager?.isPro?.value == true
+    if (isPro) {
+        val snoozeIntent = Intent(context, ReminderAlarmReceiver::class.java).apply {
+            action = ACTION_SNOOZE_REMINDER
+            data = Uri.parse("keeply://snooze/${thing.id}")
+            putExtra(EXTRA_THING_ID, thing.id)
+        }
+        val snoozePendingIntent = PendingIntent.getBroadcast(
+            context,
+            0,
+            snoozeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        .addAction(
-            R.drawable.ic_notification_keeply,
-            "Mark done",
-            markDonePendingIntent
+        val markDoneIntent = Intent(context, ReminderAlarmReceiver::class.java).apply {
+            action = ACTION_MARK_DONE
+            data = Uri.parse("keeply://done/${thing.id}")
+            putExtra(EXTRA_THING_ID, thing.id)
+        }
+        val markDonePendingIntent = PendingIntent.getBroadcast(
+            context,
+            0,
+            markDoneIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        .build()
+        notificationBuilder
+            .addAction(
+                R.drawable.ic_notification_keeply,
+                "Snooze 1 hour",
+                snoozePendingIntent
+            )
+            .addAction(
+                R.drawable.ic_notification_keeply,
+                "Mark done",
+                markDonePendingIntent
+            )
+    }
+
+    val notification = notificationBuilder.build()
     return try {
         NotificationManagerCompat.from(context).notify(thing.id, REMINDER_NOTIFICATION_ID, notification)
         reminderLog("notification posted thingId=${thing.id}")
