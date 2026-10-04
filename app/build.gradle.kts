@@ -98,6 +98,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.google.mobile.ads)
     implementation(libs.google.ump)
+    implementation("com.android.billingclient:billing-ktx:9.1.0")
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
