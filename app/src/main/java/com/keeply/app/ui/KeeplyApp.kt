@@ -52,6 +52,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -266,7 +267,8 @@ fun KeeplyApp(
             ReminderSyncResult.ScheduledInexact -> {
                 val snackbarResult = snackbarHostState.showSnackbar(
                     message = successMessage,
-                    actionLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "Exact timing" else null
+                    actionLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "Exact timing" else null,
+                    duration = SnackbarDuration.Short
                 )
                 if (snackbarResult == SnackbarResult.ActionPerformed) openExactAlarmSettings(context)
             }
@@ -287,7 +289,8 @@ fun KeeplyApp(
             viewModel?.reconcileReminders()
             val result = snackbarHostState.showSnackbar(
                 message = successMessage,
-                actionLabel = if (exactAlarmAccessUnavailable(context)) "Exact timing" else null
+                actionLabel = if (exactAlarmAccessUnavailable(context)) "Exact timing" else null,
+                duration = SnackbarDuration.Short
             )
             if (result == SnackbarResult.ActionPerformed) openExactAlarmSettings(context)
         } else {
