@@ -31,7 +31,8 @@ private enum class BannerLoadState { LOADING, LOADED, FAILED }
 fun KeeplyAdBanner(modifier: Modifier = Modifier) {
     val app = LocalContext.current.applicationContext as? KeeplyApplication ?: return
     val adsReady by app.consentManager.adsReady.collectAsStateWithLifecycle()
-    if (!adsReady) return
+    val isPro by app.proManager.isPro.collectAsStateWithLifecycle()
+    if (!adsReady || isPro) return
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val context = LocalContext.current
         val widthDp = maxWidth.value.toInt().coerceAtLeast(1)
