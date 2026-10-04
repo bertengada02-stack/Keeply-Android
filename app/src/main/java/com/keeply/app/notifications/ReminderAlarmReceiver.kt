@@ -61,10 +61,14 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
 
     private fun handleMarkDone(context: Context, intent: Intent) {
         val thingId = intent.getStringExtra(EXTRA_THING_ID) ?: return
+        val app = context.applicationContext as KeeplyApplication
+        if (!app.proManager.isPro.value) {
+            reminderLog("mark done from notification rejected non-Pro thingId=$thingId")
+            return
+        }
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val app = context.applicationContext as KeeplyApplication
                 val updated = app.thingRepository.markDone(thingId)
                 app.reminderSyncCoordinator.sync(updated)
                 NotificationManagerCompat.from(context).cancel(thingId, REMINDER_NOTIFICATION_ID)
@@ -79,10 +83,14 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
 
     private fun handleSnooze(context: Context, intent: Intent) {
         val thingId = intent.getStringExtra(EXTRA_THING_ID) ?: return
+        val app = context.applicationContext as KeeplyApplication
+        if (!app.proManager.isPro.value) {
+            reminderLog("snooze rejected non-Pro thingId=$thingId")
+            return
+        }
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val app = context.applicationContext as KeeplyApplication
                 val thing = app.thingRepository.findById(thingId)
                 if (thing == null) {
                     reminderLog("snooze rejected missing Thing thingId=$thingId")
