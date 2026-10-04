@@ -109,6 +109,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.keeply.app.R
 import com.keeply.app.ads.KeeplyAdBanner
+import com.keeply.app.billing.KeeplyProPurchaseState
 import com.keeply.app.model.Thing
 import com.keeply.app.model.ThingCategory
 import com.keeply.app.model.ThingStatus
@@ -150,6 +151,8 @@ fun KeeplyApp(
     val privacyChoicesRequired = consentManager?.privacyRequired?.collectAsStateWithLifecycle()?.value ?: false
     val isPro = app?.proManager?.isPro?.collectAsStateWithLifecycle()?.value ?: false
     val proPrice = app?.proManager?.proPrice?.collectAsStateWithLifecycle()?.value
+    val proPurchaseState = app?.proManager?.purchaseState?.collectAsStateWithLifecycle()?.value
+        ?: KeeplyProPurchaseState.Idle
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     var showStartup by remember { mutableStateOf(true) }
@@ -216,6 +219,22 @@ fun KeeplyApp(
     LaunchedEffect(Unit) {
         delay(900)
         showStartup = false
+    }
+
+    LaunchedEffect(proPurchaseState) {
+        val message = when (val state = proPurchaseState) {
+            KeeplyProPurchaseState.Purchased -> "Keeply Pro is now active."
+            KeeplyProPurchaseState.Pending -> "Your Keeply Pro purchase is pending."
+            KeeplyProPurchaseState.Cancelled -> null
+            is KeeplyProPurchaseState.Error -> state.message
+            KeeplyProPurchaseState.Idle -> null
+        }
+        if (message != null) {
+            snackbarHostState.showSnackbar(message)
+        }
+        if (proPurchaseState != KeeplyProPurchaseState.Idle) {
+            app?.proManager?.clearPurchaseState()
+        }
     }
 
     LaunchedEffect(showStartup, requestedThingId, viewModel) {
