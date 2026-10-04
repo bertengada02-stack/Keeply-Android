@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.keeply.app.KeeplyApplication
 import com.keeply.app.MainActivity
 import com.keeply.app.R
 
@@ -21,6 +22,9 @@ private const val WEEK_MILLIS = 7L * 24L * 60L * 60L * 1000L
 private const val MIN_RESCHEDULE_DELAY_MILLIS = 60_000L
 private const val PREFS_NAME = "keeply_weekly_engagement"
 private const val PREF_NEXT_TRIGGER_AT = "next_trigger_at"
+
+private fun isKeeplyPro(context: Context): Boolean =
+    (context.applicationContext as? KeeplyApplication)?.proManager?.isPro?.value == true
 
 internal fun createWeeklyEngagementChannel(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -39,6 +43,10 @@ internal fun scheduleWeeklyEngagementNotification(
     nowEpochMillis: Long = System.currentTimeMillis()
 ) {
     val appContext = context.applicationContext
+    if (!isKeeplyPro(appContext)) {
+        cancelWeeklyEngagementNotification(appContext)
+        return
+    }
     val preferences = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val savedTrigger = preferences.getLong(PREF_NEXT_TRIGGER_AT, 0L)
     val triggerAt = when {
@@ -62,6 +70,10 @@ private fun scheduleNextWeeklyEngagement(
     context: Context,
     nowEpochMillis: Long = System.currentTimeMillis()
 ) {
+    if (!isKeeplyPro(context)) {
+        cancelWeeklyEngagementNotification(context)
+        return
+    }
     val nextTrigger = nowEpochMillis + WEEK_MILLIS
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .edit()
@@ -74,6 +86,17 @@ private fun scheduleNextWeeklyEngagement(
         nextTrigger,
         weeklyEngagementPendingIntent(context)
     )
+}
+
+internal fun cancelWeeklyEngagementNotification(context: Context) {
+    val appContext = context.applicationContext
+    appContext.getSystemService(AlarmManager::class.java)
+        .cancel(weeklyEngagementPendingIntent(appContext))
+    appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .remove(PREF_NEXT_TRIGGER_AT)
+        .apply()
+    NotificationManagerCompat.from(appContext).cancel(WEEKLY_ENGAGEMENT_NOTIFICATION_ID)
 }
 
 private fun weeklyEngagementPendingIntent(context: Context): PendingIntent {
@@ -89,7 +112,7 @@ private fun weeklyEngagementPendingIntent(context: Context): PendingIntent {
 }
 
 private fun postWeeklyEngagementNotification(context: Context) {
-    if (!notificationsAllowed(context)) return
+    if (!isKeeplyPro(context) || !notificationsAllowed(context)) return
 
     val contentIntent = Intent(context, MainActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
