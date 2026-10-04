@@ -22,6 +22,10 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             handleSnooze(context, intent)
             return
         }
+        if (intent.action == ACTION_MARK_DONE) {
+            handleMarkDone(context, intent)
+            return
+        }
         if (intent.action != ACTION_DELIVER_REMINDER) return
         val thingId = intent.getStringExtra(EXTRA_THING_ID) ?: return
         val expectedEpoch = intent.getLongExtra(EXTRA_EXPECTED_EPOCH, -1L)
@@ -49,6 +53,24 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             } catch (error: Exception) {
                 // Fail closed: a transient database/notification error must not post stale data.
                 reminderLogError("receiver failed thingId=$thingId", error)
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    private fun handleMarkDone(context: Context, intent: Intent) {
+        val thingId = intent.getStringExtra(EXTRA_THING_ID) ?: return
+        val pendingResult = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                val app = context.applicationContext as KeeplyApplication
+                val updated = app.thingRepository.markDone(thingId)
+                app.reminderSyncCoordinator.sync(updated)
+                NotificationManagerCompat.from(context).cancel(thingId, REMINDER_NOTIFICATION_ID)
+                reminderLog("marked done from notification thingId=$thingId")
+            } catch (error: Exception) {
+                reminderLogError("mark done from notification failed thingId=$thingId", error)
             } finally {
                 pendingResult.finish()
             }
