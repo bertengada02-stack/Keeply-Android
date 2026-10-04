@@ -2,6 +2,7 @@ package com.keeply.app
 
 import android.app.Application
 import com.keeply.app.ads.KeeplyConsentManager
+import com.keeply.app.billing.KeeplyProManager
 import com.keeply.app.data.ThingRepository
 import com.keeply.app.data.local.KeeplyDatabase
 import com.keeply.app.notifications.AndroidReminderScheduler
@@ -19,6 +20,7 @@ import kotlinx.coroutines.launch
 
 class KeeplyApplication : Application() {
     val consentManager: KeeplyConsentManager by lazy { KeeplyConsentManager(this) }
+    val proManager: KeeplyProManager by lazy { KeeplyProManager(this) }
     val database: KeeplyDatabase by lazy { KeeplyDatabase.create(this) }
     val thingRepository: ThingRepository by lazy { ThingRepository(database.thingDao()) }
     internal val reminderSyncCoordinator: ReminderSyncCoordinator by lazy {
@@ -31,6 +33,7 @@ class KeeplyApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        proManager
         createReminderChannel(this)
         createWeeklyEngagementChannel(this)
         scheduleWeeklyEngagementNotification(this)
